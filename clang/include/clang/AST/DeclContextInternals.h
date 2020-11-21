@@ -198,7 +198,40 @@ public:
     }
 
     DeclsTy &Vec = *getAsVector();
-    Vec.push_back(D);
+
+    // Using directives end up in a special entry which contains only
+    // other using directives, so all this logic is wasted for them.
+    // But avoiding the logic wastes time in the far-more-common case
+    // that we're *not* adding a new using directive.
+
+    // Tag declarations always go at the end of the list so that an
+    // iterator which points at the first tag will start a span of
+    // decls that only contains tags.
+    if (D->hasTagIdentifierNamespace())
+      Vec.push_back(D);
+
+    // Resolved using declarations go at the front of the list so that
+    // they won't show up in other lookup results.  Unresolved using
+    // declarations (which are always in IDNS_Using | IDNS_Ordinary)
+    // follow that so that the using declarations will be contiguous.
+    else if (D->getIdentifierNamespace() & Decl::IDNS_Using) {
+      DeclsTy::iterator I = Vec.begin();
+      if (D->getIdentifierNamespace() != Decl::IDNS_Using) {
+        while (I != Vec.end() &&
+               (*I)->getIdentifierNamespace() == Decl::IDNS_Using)
+          ++I;
+      }
+      Vec.push_back(I, D);
+
+    // All other declarations go at the end of the list, but before any
+    // tag declarations.  But we can be clever about tag declarations
+    // because there can only ever be one in a scope.
+    } else if (!Vec.empty() && Vec.back()->hasTagIdentifierNamespace()) {
+      NamedDecl *TagD = Vec.back();
+      Vec.back() = D;
+      Vec.push_back(TagD);
+    } else
+      Vec.push_back(D);
   }
 };
 
