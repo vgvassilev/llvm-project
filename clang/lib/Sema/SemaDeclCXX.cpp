@@ -4107,13 +4107,9 @@ ValueDecl *Sema::tryLookupCtorInitMemberDecl(CXXRecordDecl *ClassDecl,
                                              IdentifierInfo *MemberOrBase) {
   if (SS.getScopeRep() || TemplateTypeTy)
     return nullptr;
-  DeclContext::lookup_result Result = ClassDecl->lookup(MemberOrBase);
-  if (Result.empty())
-    return nullptr;
-  ValueDecl *Member;
-  if ((Member = dyn_cast<FieldDecl>(Result.front())) ||
-      (Member = dyn_cast<IndirectFieldDecl>(Result.front())))
-    return Member;
+  for (auto *D : ClassDecl->lookup(MemberOrBase))
+    if (isa<FieldDecl>(D) || isa<IndirectFieldDecl>(D))
+      return cast<ValueDecl>(D);
   return nullptr;
 }
 
