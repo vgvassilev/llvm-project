@@ -622,7 +622,7 @@ ClassImplementsAllMethodsAndProperties(ASTContext &Ctx,
                                   Property->getQueryKind()))
           return false;
       }
-      else if (ObjCPropertyDecl *ClassProperty = dyn_cast<ObjCPropertyDecl>(R[0])) {
+      else if (auto *ClassProperty = dyn_cast<ObjCPropertyDecl>(R.front())) {
           if ((ClassProperty->getPropertyAttributes()
               != Property->getPropertyAttributes()) ||
               !Ctx.hasSameType(ClassProperty->getType(), Property->getType()))
@@ -650,7 +650,7 @@ ClassImplementsAllMethodsAndProperties(ASTContext &Ctx,
       bool match = false;
       HasAtleastOneRequiredMethod = true;
       for (unsigned I = 0, N = R.size(); I != N; ++I)
-        if (ObjCMethodDecl *ImpMD = dyn_cast<ObjCMethodDecl>(R[0]))
+        if (ObjCMethodDecl *ImpMD = dyn_cast<ObjCMethodDecl>(R.front()))
           if (Ctx.ObjCMethodsAreEqual(MD, ImpMD)) {
             match = true;
             break;

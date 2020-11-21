@@ -1225,34 +1225,38 @@ public:
 /// single result (with no stable storage) or a collection of results (with
 /// stable storage provided by the lookup table).
 class DeclContextLookupResult {
-  using ResultTy = ArrayRef<NamedDecl *>;
+  using ResultTy = std::list<NamedDecl *>;
 
-  ResultTy Result;
+  llvm::iterator_range<ResultTy::const_iterator> Result;
 
   // If there is only one lookup result, it would be invalidated by
   // reallocations of the name table, so store it separately.
   NamedDecl *Single = nullptr;
 
-  static NamedDecl *const SingleElementDummyList;
+  static ResultTy const SingleElementDummyList;
 
 public:
-  DeclContextLookupResult() = default;
-  DeclContextLookupResult(ArrayRef<NamedDecl *> Result)
-      : Result(Result) {}
+  DeclContextLookupResult()
+    : Result(llvm::make_range(SingleElementDummyList.end(),
+                              SingleElementDummyList.end())) {}
+  DeclContextLookupResult(const ResultTy &Result)
+    : Result(llvm::make_range(Result.begin(), Result.end())) {}
+
   DeclContextLookupResult(NamedDecl *Single)
-      : Result(SingleElementDummyList), Single(Single) {}
+    : Result(llvm::make_range(SingleElementDummyList.begin(),
+                              SingleElementDummyList.end())), Single(Single) {}
 
   class iterator;
 
   using IteratorBase =
-      llvm::iterator_adaptor_base<iterator, ResultTy::iterator,
-                                  std::random_access_iterator_tag, NamedDecl *>;
+    llvm::iterator_adaptor_base<iterator, ResultTy::const_iterator,
+                                std::forward_iterator_tag>;
 
   class iterator : public IteratorBase {
     value_type SingleElement;
 
   public:
-    explicit iterator(pointer Pos, value_type Single = nullptr)
+    explicit iterator(ResultTy::const_iterator Pos, value_type Single = nullptr)
         : IteratorBase(Pos), SingleElement(Single) {}
 
     reference operator*() const {
@@ -1268,15 +1272,21 @@ public:
   iterator end() const { return iterator(Result.end(), Single); }
 
   bool empty() const { return Result.empty(); }
-  pointer data() const { return Single ? &Single : Result.data(); }
-  size_t size() const { return Single ? 1 : Result.size(); }
-  reference front() const { return Single ? Single : Result.front(); }
-  reference back() const { return Single ? Single : Result.back(); }
-  reference operator[](size_t N) const { return Single ? Single : Result[N]; }
+  size_t size() const {
+    if (empty())
+      return 0;
+    return Single ? 1 : std::distance(begin(), end());
+  };
+  reference front() const { return Single ? Single : *Result.begin(); }
+  reference back() const { return Single ? Single : *(--Result.end()); }
 
   // FIXME: Remove this from the interface
   DeclContextLookupResult slice(size_t N) const {
-    DeclContextLookupResult Sliced = Result.slice(N);
+    assert(size() >= N);
+    DeclContextLookupResult Sliced;
+    auto I = Result.begin();
+    std::advance(I, N);
+    Sliced.Result = llvm::make_range(I, Result.end());
     Sliced.Single = Single;
     return Sliced;
   }

@@ -112,9 +112,8 @@ CheckPropertyAgainstProtocol(Sema &S, ObjCPropertyDecl *Prop,
     return;
 
   // Look for a property with the same name.
-  DeclContext::lookup_result R = Proto->lookup(Prop->getDeclName());
-  for (unsigned I = 0, N = R.size(); I != N; ++I) {
-    if (ObjCPropertyDecl *ProtoProp = dyn_cast<ObjCPropertyDecl>(R[I])) {
+  for (auto *R : Proto->lookup(Prop->getDeclName())) {
+    if (ObjCPropertyDecl *ProtoProp = dyn_cast<ObjCPropertyDecl>(R)) {
       S.DiagnosePropertyMismatch(Prop, ProtoProp, Proto->getIdentifier(), true);
       return;
     }
@@ -233,9 +232,8 @@ Decl *Sema::ActOnProperty(Scope *S, SourceLocation AtLoc,
     bool FoundInSuper = false;
     ObjCInterfaceDecl *CurrentInterfaceDecl = IFace;
     while (ObjCInterfaceDecl *Super = CurrentInterfaceDecl->getSuperClass()) {
-      DeclContext::lookup_result R = Super->lookup(Res->getDeclName());
-      for (unsigned I = 0, N = R.size(); I != N; ++I) {
-        if (ObjCPropertyDecl *SuperProp = dyn_cast<ObjCPropertyDecl>(R[I])) {
+      for (auto *R : Super->lookup(Res->getDeclName())) {
+        if (ObjCPropertyDecl *SuperProp = dyn_cast<ObjCPropertyDecl>(R)) {
           DiagnosePropertyMismatch(Res, SuperProp, Super->getIdentifier(), false);
           FoundInSuper = true;
           break;
@@ -1150,7 +1148,7 @@ Decl *Sema::ActOnPropertyImplDecl(Scope *S,
       for (auto *Ext : IDecl->known_extensions()) {
         DeclContext::lookup_result R = Ext->lookup(property->getDeclName());
         if (!R.empty())
-          if (ObjCPropertyDecl *ExtProp = dyn_cast<ObjCPropertyDecl>(R[0])) {
+          if (auto *ExtProp = dyn_cast<ObjCPropertyDecl>(R.front())) {
             PIkind = ExtProp->getPropertyAttributesAsWritten();
             if (PIkind & ObjCPropertyAttribute::kind_readwrite) {
               ReadWriteProperty = true;

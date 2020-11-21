@@ -37,6 +37,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -1545,7 +1546,8 @@ void DeclContext::removeDecl(Decl *D) {
         assert(Pos != Map->end() && "no lookup entry for decl");
         // Remove the decl only if it is contained.
         StoredDeclsList::DeclsTy *Vec = Pos->second.getAsVector();
-        if ((Vec && is_contained(*Vec, ND)) || Pos->second.getAsDecl() == ND)
+        if ((Vec && llvm::is_contained(*Vec, ND)) ||
+            Pos->second.getAsDecl() == ND)
           Pos->second.remove(ND);
       }
     } while (DC->isTransparentContext() && (DC = DC->getParent()));
@@ -1663,7 +1665,8 @@ void DeclContext::buildLookupImpl(DeclContext *DCtx, bool Internal) {
   }
 }
 
-NamedDecl *const DeclContextLookupResult::SingleElementDummyList = nullptr;
+DeclContextLookupResult::ResultTy
+const DeclContextLookupResult::SingleElementDummyList = { nullptr };
 
 DeclContext::lookup_result
 DeclContext::lookup(DeclarationName Name) const {

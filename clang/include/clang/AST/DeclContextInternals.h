@@ -21,9 +21,9 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/PointerUnion.h"
-#include "llvm/ADT/SmallVector.h"
 #include <algorithm>
 #include <cassert>
+#include <list>
 
 namespace clang {
 
@@ -33,7 +33,7 @@ class DependentDiagnostic;
 /// one entry.
 struct StoredDeclsList {
   /// When in vector form, this is what the Data pointer points to.
-  using DeclsTy = SmallVector<NamedDecl *, 4>;
+  using DeclsTy = std::list<NamedDecl *>;
 
   /// A collection of declarations, with a flag to indicate if we have
   /// further external declarations.

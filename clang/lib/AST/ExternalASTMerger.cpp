@@ -77,7 +77,7 @@ LookupSameContext(Source<TranslationUnitDecl *> SourceTU, const DeclContext *DC,
     // nothing (rather than a possibly-inaccurate guess) here.
     return nullptr;
   } else {
-    NamedDecl *SearchResultDecl = SearchResult[0];
+    NamedDecl *SearchResultDecl = SearchResult.front();
     if (isa<DeclContext>(SearchResultDecl) &&
         SearchResultDecl->getKind() == DC->getDeclKind())
       return cast<DeclContext>(SearchResultDecl)->getPrimaryContext();
