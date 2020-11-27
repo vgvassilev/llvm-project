@@ -1609,8 +1609,7 @@ void NamedDecl::printNestedNameSpecifier(raw_ostream &OS,
 
     // Suppress inline namespace if it doesn't make the result ambiguous.
     if (P.SuppressInlineNamespace && Ctx->isInlineNamespace() && NameInScope &&
-        Ctx->lookup(NameInScope).size() ==
-            Ctx->getParent()->lookup(NameInScope).size())
+        Ctx->lookup(NameInScope).equals(Ctx->getParent()->lookup(NameInScope)))
       continue;
 
     // Skip non-named contexts such as linkage specifications and ExportDecls.

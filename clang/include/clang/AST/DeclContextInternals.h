@@ -23,7 +23,6 @@
 #include "llvm/ADT/PointerUnion.h"
 #include <algorithm>
 #include <cassert>
-#include <list>
 
 namespace clang {
 
@@ -32,18 +31,29 @@ class DependentDiagnostic;
 /// An array of decls optimized for the common case of only containing
 /// one entry.
 struct StoredDeclsList {
-  /// When in vector form, this is what the Data pointer points to.
-  using DeclsTy = std::list<NamedDecl *>;
+  using DeclsTy = DeclContextLookupResult::DeclsTy;
+  using Decls = DeclContextLookupResult::Decls;
+
+
+  /*    bool contains(NamedDecl *ND) {
+      if (D == ND)
+        return true;
+
+      for (auto* I = Rest.get<DeclsTy*>(); I && I->D == ND;
+           I = I->Rest.get<DeclsTy*>())
+        return true;
+      return false;
+      }*/
 
   /// A collection of declarations, with a flag to indicate if we have
   /// further external declarations.
-  using DeclsAndHasExternalTy = llvm::PointerIntPair<DeclsTy *, 1, bool>;
+  using DeclsAndHasExternalTy = llvm::PointerIntPair<Decls, 1, bool>;
 
   /// The stored data, which will be either a pointer to a NamedDecl,
   /// or a pointer to a vector with a flag to indicate if there are further
   /// external declarations.
+  //DeclsAndHasExternalTy Data;
   llvm::PointerUnion<NamedDecl *, DeclsAndHasExternalTy> Data;
-
 public:
   StoredDeclsList() = default;
 
@@ -54,7 +64,7 @@ public:
   ~StoredDeclsList() {
     // If this is a vector-form, free the vector.
     if (DeclsTy *Vector = getAsVector())
-      delete Vector;
+      Vector->~DeclsTy();
   }
 
   StoredDeclsList &operator=(StoredDeclsList &&RHS) {
@@ -76,7 +86,7 @@ public:
   }
 
   DeclsTy *getAsVector() const {
-    return getAsVectorAndHasExternal().getPointer();
+    return getAsVectorAndHasExternal().getPointer().dyn_cast<DeclsTy*>();
   }
 
   bool hasExternalDecls() const {
@@ -87,10 +97,11 @@ public:
     if (DeclsTy *Vec = getAsVector())
       Data = DeclsAndHasExternalTy(Vec, true);
     else {
-      DeclsTy *VT = new DeclsTy();
-      if (NamedDecl *OldD = getAsDecl())
-        VT->push_back(OldD);
-      Data = DeclsAndHasExternalTy(VT, true);
+      DeclsTy *Node = new DeclsTy();
+      if (NamedDecl *OldD = getAsDecl()) {
+        Node->D = OldD;
+      }
+      Data = DeclsAndHasExternalTy(Node, true);
     }
   }
 
@@ -130,9 +141,10 @@ public:
         *this = StoredDeclsList();
     } else {
       DeclsTy &Vec = *getAsVector();
-      Vec.erase(std::remove_if(Vec.begin(), Vec.end(),
-                               [](Decl *D) { return D->isFromASTFile(); }),
-                Vec.end());
+      for (auto I = Vec.begin(), E = Vec.end(); I != E;  ++I)
+        if ((*I)->isFromASTFile())
+          Vec.erase(I);
+
       // Don't have any external decls any more.
       Data = DeclsAndHasExternalTy(&Vec, false);
     }
@@ -193,45 +205,12 @@ public:
     // form.
     if (NamedDecl *OldD = getAsDecl()) {
       DeclsTy *VT = new DeclsTy();
-      VT->push_back(OldD);
+      VT->D = OldD;
       Data = DeclsAndHasExternalTy(VT, false);
     }
 
     DeclsTy &Vec = *getAsVector();
-
-    // Using directives end up in a special entry which contains only
-    // other using directives, so all this logic is wasted for them.
-    // But avoiding the logic wastes time in the far-more-common case
-    // that we're *not* adding a new using directive.
-
-    // Tag declarations always go at the end of the list so that an
-    // iterator which points at the first tag will start a span of
-    // decls that only contains tags.
-    if (D->hasTagIdentifierNamespace())
-      Vec.push_back(D);
-
-    // Resolved using declarations go at the front of the list so that
-    // they won't show up in other lookup results.  Unresolved using
-    // declarations (which are always in IDNS_Using | IDNS_Ordinary)
-    // follow that so that the using declarations will be contiguous.
-    else if (D->getIdentifierNamespace() & Decl::IDNS_Using) {
-      DeclsTy::iterator I = Vec.begin();
-      if (D->getIdentifierNamespace() != Decl::IDNS_Using) {
-        while (I != Vec.end() &&
-               (*I)->getIdentifierNamespace() == Decl::IDNS_Using)
-          ++I;
-      }
-      Vec.push_back(I, D);
-
-    // All other declarations go at the end of the list, but before any
-    // tag declarations.  But we can be clever about tag declarations
-    // because there can only ever be one in a scope.
-    } else if (!Vec.empty() && Vec.back()->hasTagIdentifierNamespace()) {
-      NamedDecl *TagD = Vec.back();
-      Vec.back() = D;
-      Vec.push_back(TagD);
-    } else
-      Vec.push_back(D);
+    Vec.push_back(D);
   }
 };
 

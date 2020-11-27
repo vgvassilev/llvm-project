@@ -1225,38 +1225,122 @@ public:
 /// single result (with no stable storage) or a collection of results (with
 /// stable storage provided by the lookup table).
 class DeclContextLookupResult {
-  using ResultTy = std::list<NamedDecl *>;
+  friend class StoredDeclsList;
+  struct ListNode;
+  using DeclsTy = ListNode;
+  /// When in vector form, this is what the Data pointer points to.
+  using Decls = llvm::PointerUnion<DeclsTy*, NamedDecl*>;
+  class ListNode {
+    friend class StoredDeclsList;
+    NamedDecl *D = nullptr;
+    Decls Rest = nullptr;
+  public:
+    ~ListNode() {
+      // while (Rest.get<ListNode*>()->Rest) {
+      //   ListNode *temp = Rest.get<ListNode*>()->Rest.get<ListNode*>();
+      //   Rest = temp->Rest;
+      //   delete temp;
+      // }
+    }
+    bool empty() const {
+      assert((D || Rest.isNull()) && "D must be not nullptr if Rest is set.");
+      return !D;
+    }
+    void push_back(NamedDecl *ND) {
+      // Find the last element
+      ListNode **Tail = Rest.getAddrOfPtr1();
+      while(*Tail)
+        Tail = (*Tail)->Rest.getAddrOfPtr1();
+      ListNode *Node = new ListNode();
+      Node->D = ND;
+      *Tail = Node;
+    }
 
-  llvm::iterator_range<ResultTy::const_iterator> Result;
+    template<bool IsConst>
+    class ListNodeIterator {
+      friend class ListNode;
+      using ConstIterator = ListNodeIterator<true>;
+    public:
+      using difference_type = ptrdiff_t;
+      using value_type =
+        typename std::conditional<IsConst, const NamedDecl*, NamedDecl*>::type;
+      using pointer = value_type *;
+      using reference = value_type &;
+      using iterator_category = std::forward_iterator_tag;
+    private:
+      using PtrTy =
+        typename std::conditional<IsConst, const ListNode*, ListNode*>::type;
+      PtrTy Ptr = nullptr;
+      ListNodeIterator(PtrTy Node) : Ptr(Node) {}
+      pointer get() const { return const_cast<pointer>(&Ptr->D); }
+    public:
+      ListNodeIterator() = default;
+      // Converting ctor from non-const iterators to const iterators. SFINAE'd
+      // out for const iterator destinations so it doesn't end up as a user
+      // defined copy constructor.
+      template <bool IsConstSrc,
+                class = std::enable_if_t<!IsConstSrc && IsConst>>
+      ListNodeIterator(const ListNodeIterator<IsConstSrc> &I) : Ptr(I.Ptr) {}
+
+      reference operator*() const { return *get(); }
+      pointer operator->() const { return get(); }
+      bool operator==(const ConstIterator &X) const { return get() == X.get(); }
+      bool operator!=(const ConstIterator &X) const { return get() != X.get(); }
+      inline ListNodeIterator& operator++() { // ++It
+        Ptr = Ptr->Rest.template dyn_cast<ListNode*>();
+        return *this;
+      }
+      ListNodeIterator operator++(int) { // It++
+        ListNodeIterator temp = *this;
+        ++*this;
+        return temp;
+      }
+    };
+    using iterator = ListNodeIterator</*IsConst = */ false>;
+    using const_iterator = ListNodeIterator</*IsConst = */ true>;
+
+    iterator begin() { return iterator(this); }
+    iterator end() { return iterator(); }
+
+    const_iterator begin() const { return const_iterator(this); }
+    const_iterator end() const { return const_iterator(); }
+
+    iterator erase(iterator position) {
+      ListNode *toDelete = position.Ptr->Rest.dyn_cast<ListNode*>();
+      position.Ptr->Rest = position.Ptr->Rest.dyn_cast<ListNode*>()->Rest;
+      delete toDelete;
+      return position;
+    }
+  };
+
+  using ResultTy = DeclsTy; //std::list<NamedDecl *>;
+
+  ResultTy* Result = nullptr;
 
   // If there is only one lookup result, it would be invalidated by
   // reallocations of the name table, so store it separately.
   NamedDecl *Single = nullptr;
 
-  static ResultTy const SingleElementDummyList;
-
+  static ResultTy SingleElementDummyList;
 public:
-  DeclContextLookupResult()
-    : Result(llvm::make_range(SingleElementDummyList.end(),
-                              SingleElementDummyList.end())) {}
-  DeclContextLookupResult(const ResultTy &Result)
-    : Result(llvm::make_range(Result.begin(), Result.end())) {}
+  DeclContextLookupResult() = default;
+  DeclContextLookupResult(ResultTy &Result) : Result(&Result) {}
 
   DeclContextLookupResult(NamedDecl *Single)
-    : Result(llvm::make_range(SingleElementDummyList.begin(),
-                              SingleElementDummyList.end())), Single(Single) {}
+    : Result(&SingleElementDummyList), Single(Single) {}
 
   class iterator;
 
   using IteratorBase =
-    llvm::iterator_adaptor_base<iterator, ResultTy::const_iterator,
-                                std::forward_iterator_tag>;
+    llvm::iterator_adaptor_base<iterator, ResultTy::iterator,
+                                std::forward_iterator_tag, NamedDecl*, ptrdiff_t,
+                                NamedDecl*, NamedDecl*>;
 
   class iterator : public IteratorBase {
     value_type SingleElement;
 
   public:
-    explicit iterator(ResultTy::const_iterator Pos, value_type Single = nullptr)
+    explicit iterator(ResultTy::iterator Pos, value_type Single = nullptr)
         : IteratorBase(Pos), SingleElement(Single) {}
 
     reference operator*() const {
@@ -1268,28 +1352,46 @@ public:
   using pointer = iterator::pointer;
   using reference = iterator::reference;
 
-  iterator begin() const { return iterator(Result.begin(), Single); }
-  iterator end() const { return iterator(Result.end(), Single); }
+  iterator begin() { return iterator(Result->begin(), Single); }
+  iterator end() { return iterator(Result->end(), Single); }
+  const_iterator begin() const { return begin(); }
+  const_iterator end() const { return end(); }
 
-  bool empty() const { return Result.empty(); }
-  size_t size() const {
-    if (empty())
-      return 0;
-    return Single ? 1 : std::distance(begin(), end());
-  };
-  reference front() const { return Single ? Single : *Result.begin(); }
-  reference back() const { return Single ? Single : *(--Result.end()); }
+  bool empty() const { return !Result || Result->empty(); }
+  bool isSingleResult() const { return !empty() && Single; }
+  bool equals(const DeclContextLookupResult &RHS) const {
+    if (empty() && RHS.empty())
+      return true;
+    if (empty() != RHS.empty())
+      return false;
+    if (Single && RHS.Single)
+      return Single == RHS.Single;
 
+    //FIXME: We should probably copy, sort and compare one by one.
+    DeclContextLookupResult X = *this;
+    DeclContextLookupResult Y = RHS;
+    return std::distance(X.begin(), X.end()) ==
+      std::distance(Y.begin(), Y.end());
+  }
+  // size_t size() const {
+  //   if (empty())
+  //     return 0;
+  //   return Single ? 1 : std::distance(begin(), end());
+  // };
+  //value_type front() const { return Single ? Single : *Result.begin(); }
+  reference front() const { return Single ? Single : *Result->begin(); }
   // FIXME: Remove this from the interface
   DeclContextLookupResult slice(size_t N) const {
-    assert(size() >= N);
-    DeclContextLookupResult Sliced;
-    auto I = Result.begin();
-    std::advance(I, N);
-    Sliced.Result = llvm::make_range(I, Result.end());
-    Sliced.Single = Single;
+    assert(N <= (size_t)std::distance(begin(), end()));
+    auto I = Result->begin();
+    while(N--) {
+      ++I;
+    }
+    DeclContextLookupResult Sliced = *I;
     return Sliced;
   }
+  //reference back() const { return Single ? Single : *(--Result.end()); }
+
 };
 
 /// DeclContext - This is used only as base class of specific decl types that
