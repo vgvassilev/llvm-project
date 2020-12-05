@@ -1229,7 +1229,7 @@ class DeclContextLookupResult {
   struct ListNode;
   using DeclsTy = ListNode;
   /// When in vector form, this is what the Data pointer points to.
-  using Decls = llvm::PointerUnion<DeclsTy*, NamedDecl*>;
+  using Decls = llvm::PointerUnion<NamedDecl*, DeclsTy*>;
   class ListNode {
     friend class StoredDeclsList;
     NamedDecl *D = nullptr;
@@ -1247,18 +1247,20 @@ class DeclContextLookupResult {
       return !D;
     }
     void push_back(NamedDecl *ND) {
-      // Find the last element
-      ListNode **Tail = Rest.getAddrOfPtr1();
-      while(*Tail)
-        Tail = (*Tail)->Rest.getAddrOfPtr1();
       ListNode *Node = new ListNode();
       Node->D = ND;
-      *Tail = Node;
+
+      ListNode *Prev = this;
+      while(Prev->Rest)
+        Prev = Prev->Rest.get<ListNode*>();
+
+      Prev->Rest = Node;
     }
 
     template<bool IsConst>
     class ListNodeIterator {
       friend class ListNode;
+      friend class DeclContextLookupResult;
       using ConstIterator = ListNodeIterator<true>;
     public:
       using difference_type = ptrdiff_t;
@@ -1270,9 +1272,13 @@ class DeclContextLookupResult {
     private:
       using PtrTy =
         typename std::conditional<IsConst, const ListNode*, ListNode*>::type;
-      PtrTy Ptr = nullptr;
-      ListNodeIterator(PtrTy Node) : Ptr(Node) {}
-      pointer get() const { return const_cast<pointer>(&Ptr->D); }
+      Decls Ptr = nullptr;
+      ListNodeIterator(Decls Node) : Ptr(Node) {
+        
+      }
+      // ListNodeIterator(PtrTy Node) : Ptr(const_cast<ListNode*>(Node)) {}
+      // ListNodeIterator(value_type Node) : Ptr(const_cast<NamedDecl*>(Node)) {}
+      bool isNamedDecl() const { return Ptr.dyn_cast<NamedDecl*>(); }
     public:
       ListNodeIterator() = default;
       // Converting ctor from non-const iterators to const iterators. SFINAE'd
@@ -1282,90 +1288,97 @@ class DeclContextLookupResult {
                 class = std::enable_if_t<!IsConstSrc && IsConst>>
       ListNodeIterator(const ListNodeIterator<IsConstSrc> &I) : Ptr(I.Ptr) {}
 
-      reference operator*() const { return *get(); }
-      pointer operator->() const { return get(); }
-      bool operator==(const ConstIterator &X) const { return get() == X.get(); }
-      bool operator!=(const ConstIterator &X) const { return get() != X.get(); }
+      reference operator*() const {
+        assert(Ptr && "dereferencing end() iterator");
+        // FIXME: Remove the const_casts...
+        if (isNamedDecl())
+          return *(const_cast<NamedDecl**>(Ptr.getAddrOfPtr1()));
+        return Ptr.get<ListNode*>()->D;
+      }
+      pointer operator->() const {
+        assert(Ptr && "dereferencing end() iterator");
+        if (isNamedDecl())
+          return Ptr.getAddrOfPtr1();
+
+        return &Ptr.get<ListNode*>()->D;
+      }
+      bool operator==(const ConstIterator &X) const { return Ptr == X.Ptr; }
+      bool operator!=(const ConstIterator &X) const { return Ptr != X.Ptr; }
       inline ListNodeIterator& operator++() { // ++It
-        Ptr = Ptr->Rest.template dyn_cast<ListNode*>();
+        assert(!Ptr.isNull() && "Advancing empty iterator");
+        assert((Ptr.dyn_cast<NamedDecl*>() || Ptr.dyn_cast<ListNode*>()) &&
+               "Advancing empty iterator");
+
+        Ptr = !isNamedDecl() ? Ptr.get<ListNode*>()->Rest : nullptr;
         return *this;
       }
       ListNodeIterator operator++(int) { // It++
         ListNodeIterator temp = *this;
-        ++*this;
+        ++(*this);
         return temp;
       }
     };
     using iterator = ListNodeIterator</*IsConst = */ false>;
     using const_iterator = ListNodeIterator</*IsConst = */ true>;
 
-    iterator begin() { return iterator(this); }
+    iterator begin() {
+      return iterator(this);
+    }
     iterator end() { return iterator(); }
 
-    const_iterator begin() const { return const_iterator(this); }
-    const_iterator end() const { return const_iterator(); }
+    // const_iterator begin() const { return const_iterator(this); }
+    // const_iterator end() const { return const_iterator(); }
 
     iterator erase(iterator position) {
-      ListNode *toDelete = position.Ptr->Rest.dyn_cast<ListNode*>();
-      position.Ptr->Rest = position.Ptr->Rest.dyn_cast<ListNode*>()->Rest;
+      ListNode *toDelete = position.Ptr.get<ListNode*>()->Rest.get<ListNode*>();
+      position.Ptr.get<ListNode*>()->Rest = toDelete->Rest;
       delete toDelete;
       return position;
     }
   };
 
-  using ResultTy = DeclsTy; //std::list<NamedDecl *>;
+  //  using ResultTy = DeclsTy;
 
-  ResultTy* Result = nullptr;
+  Decls Result = nullptr;
 
-  // If there is only one lookup result, it would be invalidated by
-  // reallocations of the name table, so store it separately.
-  NamedDecl *Single = nullptr;
-
-  static ResultTy SingleElementDummyList;
+  //static ResultTy SingleElementDummyList;
 public:
   DeclContextLookupResult() = default;
-  DeclContextLookupResult(ResultTy &Result) : Result(&Result) {}
+  DeclContextLookupResult(Decls Result) : Result(Result) {}
 
-  DeclContextLookupResult(NamedDecl *Single)
-    : Result(&SingleElementDummyList), Single(Single) {}
+  //DeclContextLookupResult(NamedDecl *Single) : Result(Single) {}
 
-  class iterator;
-
-  using IteratorBase =
-    llvm::iterator_adaptor_base<iterator, ResultTy::iterator,
-                                std::forward_iterator_tag, NamedDecl*, ptrdiff_t,
-                                NamedDecl*, NamedDecl*>;
-
-  class iterator : public IteratorBase {
-    value_type SingleElement;
-
-  public:
-    explicit iterator(ResultTy::iterator Pos, value_type Single = nullptr)
-        : IteratorBase(Pos), SingleElement(Single) {}
-
-    reference operator*() const {
-      return SingleElement ? SingleElement : IteratorBase::operator*();
-    }
-  };
-
+  using iterator = ListNode::ListNodeIterator</*IsConst = */ false>;
+  // FIXME: Add a proper const iterator
+  //using const_iterator = ListNode::ListNodeIterator</*IsConst = */ true>;
   using const_iterator = iterator;
-  using pointer = iterator::pointer;
   using reference = iterator::reference;
 
-  iterator begin() { return iterator(Result->begin(), Single); }
-  iterator end() { return iterator(Result->end(), Single); }
-  const_iterator begin() const { return begin(); }
-  const_iterator end() const { return end(); }
+  iterator begin() { return iterator(Result); }
+  //   if (empty())
+  //     return end();
+    
+  //   if (NamedDecl *ND = Result.dyn_cast<NamedDecl*>())
+  //     return iterator(ND);
+  //   return iterator(Result.get<ListNode*>());
+  // }
+  iterator end() { return iterator(); }
+  const_iterator begin() const {
+    return const_cast<DeclContextLookupResult*>(this)->begin();
+  }
+  const_iterator end() const { return iterator(); }
 
-  bool empty() const { return !Result || Result->empty(); }
-  bool isSingleResult() const { return !empty() && Single; }
+  bool empty() const { return Result.isNull(); }
+  bool isSingleResult() const {
+    return !empty() && !Result.dyn_cast<ListNode*>();
+  }
   bool equals(const DeclContextLookupResult &RHS) const {
     if (empty() && RHS.empty())
       return true;
-    if (empty() != RHS.empty())
-      return false;
-    if (Single && RHS.Single)
-      return Single == RHS.Single;
+    if (empty() == RHS.empty())
+      return true;
+    if (isSingleResult() == RHS.isSingleResult())
+      return true;
 
     //FIXME: We should probably copy, sort and compare one by one.
     DeclContextLookupResult X = *this;
@@ -1373,25 +1386,18 @@ public:
     return std::distance(X.begin(), X.end()) ==
       std::distance(Y.begin(), Y.end());
   }
-  // size_t size() const {
-  //   if (empty())
-  //     return 0;
-  //   return Single ? 1 : std::distance(begin(), end());
-  // };
-  //value_type front() const { return Single ? Single : *Result.begin(); }
-  reference front() const { return Single ? Single : *Result->begin(); }
+
+  reference front() const { return *begin(); }
   // FIXME: Remove this from the interface
   DeclContextLookupResult slice(size_t N) const {
     assert(N <= (size_t)std::distance(begin(), end()));
-    auto I = Result->begin();
+    auto I = begin();
     while(N--) {
       ++I;
     }
-    DeclContextLookupResult Sliced = *I;
+    DeclContextLookupResult Sliced(I == end() ? nullptr : *I);
     return Sliced;
   }
-  //reference back() const { return Single ? Single : *(--Result.end()); }
-
 };
 
 /// DeclContext - This is used only as base class of specific decl types that

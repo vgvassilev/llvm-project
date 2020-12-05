@@ -34,17 +34,6 @@ struct StoredDeclsList {
   using DeclsTy = DeclContextLookupResult::DeclsTy;
   using Decls = DeclContextLookupResult::Decls;
 
-
-  /*    bool contains(NamedDecl *ND) {
-      if (D == ND)
-        return true;
-
-      for (auto* I = Rest.get<DeclsTy*>(); I && I->D == ND;
-           I = I->Rest.get<DeclsTy*>())
-        return true;
-      return false;
-      }*/
-
   /// A collection of declarations, with a flag to indicate if we have
   /// further external declarations.
   using DeclsAndHasExternalTy = llvm::PointerIntPair<Decls, 1, bool>;
@@ -52,13 +41,13 @@ struct StoredDeclsList {
   /// The stored data, which will be either a pointer to a NamedDecl,
   /// or a pointer to a vector with a flag to indicate if there are further
   /// external declarations.
-  //DeclsAndHasExternalTy Data;
-  llvm::PointerUnion<NamedDecl *, DeclsAndHasExternalTy> Data;
+  DeclsAndHasExternalTy Data;
 public:
   StoredDeclsList() = default;
 
   StoredDeclsList(StoredDeclsList &&RHS) : Data(RHS.Data) {
-    RHS.Data = (NamedDecl *)nullptr;
+    RHS.Data.setPointer(nullptr);
+    RHS.Data.setInt(0);
   }
 
   ~StoredDeclsList() {
@@ -71,18 +60,19 @@ public:
     if (DeclsTy *Vector = getAsVector())
       delete Vector;
     Data = RHS.Data;
-    RHS.Data = (NamedDecl *)nullptr;
+    RHS.Data.setPointer(nullptr);
+    RHS.Data.setInt(0);
     return *this;
   }
 
-  bool isNull() const { return Data.isNull(); }
+  bool isNull() const { return Data.getPointer().isNull(); }
 
   NamedDecl *getAsDecl() const {
-    return Data.dyn_cast<NamedDecl *>();
+    return Data.getPointer().dyn_cast<NamedDecl *>();
   }
 
   DeclsAndHasExternalTy getAsVectorAndHasExternal() const {
-    return Data.dyn_cast<DeclsAndHasExternalTy>();
+    return Data;
   }
 
   DeclsTy *getAsVector() const {
@@ -107,7 +97,7 @@ public:
 
   void setOnlyValue(NamedDecl *ND) {
     assert(!getAsVector() && "Not inline");
-    Data = ND;
+    Data.setPointer(ND);
     // Make sure that Data is a plain NamedDecl* so we can use its address
     // at getLookupResult.
     assert(*(NamedDecl **)&Data == ND &&
@@ -119,7 +109,8 @@ public:
     if (NamedDecl *Singleton = getAsDecl()) {
       assert(Singleton == D && "list is different singleton");
       (void)Singleton;
-      Data = (NamedDecl *)nullptr;
+      Data.setPointer(nullptr);
+      Data.setInt(0);
       return;
     }
 
@@ -156,19 +147,19 @@ public:
     if (isNull())
       return DeclContext::lookup_result();
 
-    // If we have a single NamedDecl, return it.
-    if (NamedDecl *ND = getAsDecl()) {
-      assert(!isNull() && "Empty list isn't allowed");
+    // // If we have a single NamedDecl, return it.
+    // if (NamedDecl *ND = getAsDecl()) {
+    //   assert(!isNull() && "Empty list isn't allowed");
 
-      // Data is a raw pointer to a NamedDecl*, return it.
-      return DeclContext::lookup_result(ND);
-    }
+    //   // Data is a raw pointer to a NamedDecl*, return it.
+    //   return DeclContext::lookup_result(ND);
+    // }
 
-    assert(getAsVector() && "Must have a vector at this point");
-    DeclsTy &Vector = *getAsVector();
+    // assert(getAsVector() && "Must have a vector at this point");
+    // DeclsTy *Vector = getAsVector();
 
-    // Otherwise, we have a range result.
-    return DeclContext::lookup_result(Vector);
+    // // Otherwise, we have a range result.
+    return DeclContext::lookup_result(Data.getPointer());
   }
 
   /// HandleRedeclaration - If this is a redeclaration of an existing decl,
