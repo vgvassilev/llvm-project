@@ -1227,28 +1227,22 @@ public:
 class DeclContextLookupResult {
   friend class StoredDeclsList;
   struct ListNode;
-  using DeclsTy = ListNode;
-  /// When in vector form, this is what the Data pointer points to.
-  using Decls = llvm::PointerUnion<NamedDecl*, DeclsTy*>;
+  /// When in collection form, this is what the Data pointer points to.
+  using Decls = llvm::PointerUnion<NamedDecl*, ListNode*>;
   class ListNode {
     friend class StoredDeclsList;
     NamedDecl *D = nullptr;
     Decls Rest = nullptr;
   public:
-    ~ListNode() {
-      // while (Rest.get<ListNode*>()->Rest) {
-      //   ListNode *temp = Rest.get<ListNode*>()->Rest.get<ListNode*>();
-      //   Rest = temp->Rest;
-      //   delete temp;
-      // }
-    }
+    ListNode(NamedDecl *ND) : D(ND) {}
     bool empty() const {
       assert((D || Rest.isNull()) && "D must be not nullptr if Rest is set.");
-      return !D;
+      return !D && Rest.isNull();
     }
+
     void push_back(NamedDecl *ND) {
-      ListNode *Node = new ListNode();
-      Node->D = ND;
+      assert(D && "No need to call push_back");
+      ListNode *Node = new ListNode(ND);
 
       ListNode *Prev = this;
       while(Prev->Rest)
@@ -1270,14 +1264,8 @@ class DeclContextLookupResult {
       using reference = value_type &;
       using iterator_category = std::forward_iterator_tag;
     private:
-      using PtrTy =
-        typename std::conditional<IsConst, const ListNode*, ListNode*>::type;
       Decls Ptr = nullptr;
-      ListNodeIterator(Decls Node) : Ptr(Node) {
-        
-      }
-      // ListNodeIterator(PtrTy Node) : Ptr(const_cast<ListNode*>(Node)) {}
-      // ListNodeIterator(value_type Node) : Ptr(const_cast<NamedDecl*>(Node)) {}
+      ListNodeIterator(Decls Node) : Ptr(Node) { }
       bool isNamedDecl() const { return Ptr.dyn_cast<NamedDecl*>(); }
     public:
       ListNodeIterator() = default;
@@ -1297,10 +1285,7 @@ class DeclContextLookupResult {
       }
       pointer operator->() const {
         assert(Ptr && "dereferencing end() iterator");
-        if (isNamedDecl())
-          return Ptr.getAddrOfPtr1();
-
-        return &Ptr.get<ListNode*>()->D;
+        return isNamedDecl() ? Ptr.getAddrOfPtr1() : &Ptr.get<ListNode*>()->D;
       }
       bool operator==(const ConstIterator &X) const { return Ptr == X.Ptr; }
       bool operator!=(const ConstIterator &X) const { return Ptr != X.Ptr; }
@@ -1322,6 +1307,8 @@ class DeclContextLookupResult {
     using const_iterator = ListNodeIterator</*IsConst = */ true>;
 
     iterator begin() {
+      if(empty())
+        return end();
       return iterator(this);
     }
     iterator end() { return iterator(); }
@@ -1329,24 +1316,28 @@ class DeclContextLookupResult {
     // const_iterator begin() const { return const_iterator(this); }
     // const_iterator end() const { return const_iterator(); }
 
-    iterator erase(iterator position) {
-      ListNode *toDelete = position.Ptr.get<ListNode*>()->Rest.get<ListNode*>();
-      position.Ptr.get<ListNode*>()->Rest = toDelete->Rest;
-      delete toDelete;
-      return position;
+    template<typename Pred>
+    void erase_if(Pred pred) {
+      ListNode *Prev = this;
+      while(Prev && !pred(Prev->Rest.get<ListNode*>()->D))
+        Prev = Prev->Rest.get<ListNode*>();
+
+      assert(Prev && "list does not contain decl");
+      ListNode *ToDelete = Prev->Rest.get<ListNode*>();
+      Prev->Rest = ToDelete->Rest;
+      delete ToDelete;
+    }
+
+    void erase(NamedDecl *ND) {
+      erase_if([ND](NamedDecl *D){ return D == ND; });
     }
   };
 
-  //  using ResultTy = DeclsTy;
-
   Decls Result = nullptr;
 
-  //static ResultTy SingleElementDummyList;
 public:
   DeclContextLookupResult() = default;
   DeclContextLookupResult(Decls Result) : Result(Result) {}
-
-  //DeclContextLookupResult(NamedDecl *Single) : Result(Single) {}
 
   using iterator = ListNode::ListNodeIterator</*IsConst = */ false>;
   // FIXME: Add a proper const iterator
@@ -1354,23 +1345,27 @@ public:
   using const_iterator = iterator;
   using reference = iterator::reference;
 
-  iterator begin() { return iterator(Result); }
-  //   if (empty())
-  //     return end();
-    
-  //   if (NamedDecl *ND = Result.dyn_cast<NamedDecl*>())
-  //     return iterator(ND);
-  //   return iterator(Result.get<ListNode*>());
-  // }
+  iterator begin() {
+    if (empty())
+      return end();
+    return iterator(Result);
+  }
   iterator end() { return iterator(); }
   const_iterator begin() const {
     return const_cast<DeclContextLookupResult*>(this)->begin();
   }
   const_iterator end() const { return iterator(); }
 
-  bool empty() const { return Result.isNull(); }
+  bool empty() const {
+    if (Result.isNull())
+      return true;
+    // Might have been prepared to be filled later (see setHasExternalDecls).
+    if (Result.dyn_cast<NamedDecl*>() || !Result.get<ListNode*>()->empty())
+      return false;
+    return true;
+  }
   bool isSingleResult() const {
-    return !empty() && !Result.dyn_cast<ListNode*>();
+    return !empty() && Result.dyn_cast<NamedDecl*>();
   }
   bool equals(const DeclContextLookupResult &RHS) const {
     if (empty() && RHS.empty())
@@ -1392,10 +1387,10 @@ public:
   DeclContextLookupResult slice(size_t N) const {
     assert(N <= (size_t)std::distance(begin(), end()));
     auto I = begin();
-    while(N--) {
+    while(N--)
       ++I;
-    }
-    DeclContextLookupResult Sliced(I == end() ? nullptr : *I);
+
+    DeclContextLookupResult Sliced(I.Ptr);
     return Sliced;
   }
 };

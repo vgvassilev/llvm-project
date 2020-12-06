@@ -1373,9 +1373,6 @@ DeclContext::LoadLexicalDeclsFromExternalStorage() const {
   return true;
 }
 
-// DeclContextLookupResult::ResultTy
-// DeclContextLookupResult::SingleElementDummyList;
-
 DeclContext::lookup_result
 ExternalASTSource::SetNoExternalVisibleDeclsForName(const DeclContext *DC,
                                                     DeclarationName Name) {

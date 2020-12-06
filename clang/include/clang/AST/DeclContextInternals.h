@@ -31,7 +31,7 @@ class DependentDiagnostic;
 /// An array of decls optimized for the common case of only containing
 /// one entry.
 struct StoredDeclsList {
-  using DeclsTy = DeclContextLookupResult::DeclsTy;
+  using DeclsTy = DeclContextLookupResult::ListNode;
   using Decls = DeclContextLookupResult::Decls;
 
   /// A collection of declarations, with a flag to indicate if we have
@@ -68,7 +68,7 @@ public:
   bool isNull() const { return Data.getPointer().isNull(); }
 
   NamedDecl *getAsDecl() const {
-    return Data.getPointer().dyn_cast<NamedDecl *>();
+    return getAsVectorAndHasExternal().getPointer().dyn_cast<NamedDecl *>();
   }
 
   DeclsAndHasExternalTy getAsVectorAndHasExternal() const {
@@ -87,11 +87,10 @@ public:
     if (DeclsTy *Vec = getAsVector())
       Data = DeclsAndHasExternalTy(Vec, true);
     else {
-      DeclsTy *Node = new DeclsTy();
-      if (NamedDecl *OldD = getAsDecl()) {
-        Node->D = OldD;
-      }
-      Data = DeclsAndHasExternalTy(Node, true);
+      DeclsTy *VT = new DeclsTy(nullptr);
+      if (NamedDecl *OldD = getAsDecl())
+        VT->push_back(OldD);
+      Data = DeclsAndHasExternalTy(VT, true);
     }
   }
 
@@ -100,7 +99,7 @@ public:
     Data.setPointer(ND);
     // Make sure that Data is a plain NamedDecl* so we can use its address
     // at getLookupResult.
-    assert(*(NamedDecl **)&Data == ND &&
+    assert(*(NamedDecl **)Data.getPointer().getAddrOfPtr1() == ND &&
            "PointerUnion mangles the NamedDecl pointer!");
   }
 
@@ -115,9 +114,7 @@ public:
     }
 
     DeclsTy &Vec = *getAsVector();
-    DeclsTy::iterator I = llvm::find(Vec, D);
-    assert(I != Vec.end() && "list does not contain decl");
-    Vec.erase(I);
+    Vec.erase(D);
 
     assert(llvm::find(Vec, D) == Vec.end() && "list still contains decl");
   }
@@ -132,9 +129,7 @@ public:
         *this = StoredDeclsList();
     } else {
       DeclsTy &Vec = *getAsVector();
-      for (auto I = Vec.begin(), E = Vec.end(); I != E;  ++I)
-        if ((*I)->isFromASTFile())
-          Vec.erase(I);
+      Vec.erase_if([](NamedDecl *ND){ return ND->isFromASTFile(); });
 
       // Don't have any external decls any more.
       Data = DeclsAndHasExternalTy(&Vec, false);
@@ -144,21 +139,6 @@ public:
   /// getLookupResult - Return an array of all the decls that this list
   /// represents.
   DeclContext::lookup_result getLookupResult() {
-    if (isNull())
-      return DeclContext::lookup_result();
-
-    // // If we have a single NamedDecl, return it.
-    // if (NamedDecl *ND = getAsDecl()) {
-    //   assert(!isNull() && "Empty list isn't allowed");
-
-    //   // Data is a raw pointer to a NamedDecl*, return it.
-    //   return DeclContext::lookup_result(ND);
-    // }
-
-    // assert(getAsVector() && "Must have a vector at this point");
-    // DeclsTy *Vector = getAsVector();
-
-    // // Otherwise, we have a range result.
     return DeclContext::lookup_result(Data.getPointer());
   }
 
@@ -195,8 +175,7 @@ public:
     // If this is the second decl added to the list, convert this to vector
     // form.
     if (NamedDecl *OldD = getAsDecl()) {
-      DeclsTy *VT = new DeclsTy();
-      VT->D = OldD;
+      DeclsTy *VT = new DeclsTy(OldD);
       Data = DeclsAndHasExternalTy(VT, false);
     }
 
@@ -207,25 +186,21 @@ public:
 
 class StoredDeclsMap
     : public llvm::SmallDenseMap<DeclarationName, StoredDeclsList, 4> {
-public:
-  static void DestroyAll(StoredDeclsMap *Map, bool Dependent);
-
-private:
   friend class ASTContext; // walks the chain deleting these
   friend class DeclContext;
 
   llvm::PointerIntPair<StoredDeclsMap*, 1> Previous;
+public:
+  static void DestroyAll(StoredDeclsMap *Map, bool Dependent);
 };
 
 class DependentStoredDeclsMap : public StoredDeclsMap {
-public:
-  DependentStoredDeclsMap() = default;
-
-private:
   friend class DeclContext; // iterates over diagnostics
   friend class DependentDiagnostic;
 
   DependentDiagnostic *FirstDiagnostic = nullptr;
+public:
+  DependentStoredDeclsMap() = default;
 };
 
 } // namespace clang
