@@ -1221,171 +1221,100 @@ public:
   void print(raw_ostream &OS) const override;
 };
 
+/// A list storing NamedDecls in the lookup tables.
+class DeclListNode {
+  friend class ASTContext; // allocate, decallocate nodes.
+  friend class StoredDeclsList;
+  class DeclListIterator;
+public:
+  using Decls = llvm::PointerUnion<NamedDecl*, DeclListNode*>;
+  using iterator = DeclListIterator;
+private:
+  NamedDecl *D = nullptr;
+  Decls Rest = nullptr;
+  DeclListNode(NamedDecl *ND) : D(ND) {}
+  class DeclListIterator {
+    friend class DeclContextLookupResult;
+
+    Decls Ptr;
+    DeclListIterator(Decls Node) : Ptr(Node) { }
+  public:
+    using difference_type = ptrdiff_t;
+    using value_type = NamedDecl*;
+    using pointer = value_type;
+    using reference = value_type;
+    using iterator_category = std::forward_iterator_tag;
+
+    DeclListIterator() = default;
+
+    reference operator*() const {
+      assert(Ptr && "dereferencing end() iterator");
+      if (DeclListNode *CurNode = Ptr.dyn_cast<DeclListNode*>()) {
+        if (NamedDecl *ND = CurNode->Rest.dyn_cast<NamedDecl*>())
+          return ND;
+        else
+          return CurNode->D;
+      }
+      return Ptr.get<NamedDecl*>();
+    }
+    pointer operator->() const { return operator*(); }
+    bool operator==(const DeclListIterator &X) const { return Ptr == X.Ptr; }
+    bool operator!=(const DeclListIterator &X) const { return Ptr != X.Ptr; }
+    inline DeclListIterator& operator++() { // ++It
+      assert(!Ptr.isNull() && "Advancing empty iterator");
+      assert((Ptr.dyn_cast<NamedDecl*>() || Ptr.dyn_cast<DeclListNode*>()) &&
+             "Advancing empty iterator");
+
+      if (DeclListNode *CurNode = Ptr.dyn_cast<DeclListNode*>()) {
+        if (CurNode->Rest.is<NamedDecl*>())
+          Ptr = CurNode->D;
+        else
+          Ptr = CurNode->Rest;
+      } else {
+        Ptr = nullptr;
+      }
+      return *this;
+    }
+    DeclListIterator operator++(int) { // It++
+      DeclListIterator temp = *this;
+      ++(*this);
+      return temp;
+    }
+  };
+};
+
 /// The results of name lookup within a DeclContext. This is either a
 /// single result (with no stable storage) or a collection of results (with
 /// stable storage provided by the lookup table).
 class DeclContextLookupResult {
   friend class StoredDeclsList;
-  struct ListNode;
+
+  using Decls = DeclListNode::Decls;
+
   /// When in collection form, this is what the Data pointer points to.
-  using Decls = llvm::PointerUnion<NamedDecl*, ListNode*>;
-  class ListNode {
-    friend class StoredDeclsList;
-    NamedDecl *D = nullptr;
-    Decls Rest = nullptr;
-  public:
-    ListNode(NamedDecl *ND) : D(ND) {}
-    bool empty() const {
-      assert((D || Rest.isNull()) && "D must be not nullptr if Rest is set.");
-      return !D && Rest.isNull();
-    }
-
-    template<bool IsConst>
-    class ListNodeIterator {
-      friend class ListNode;
-      friend class DeclContextLookupResult;
-      using ConstIterator = ListNodeIterator<true>;
-    public:
-      using difference_type = ptrdiff_t;
-      using value_type =
-        typename std::conditional<IsConst, const NamedDecl*, NamedDecl*>::type;
-      using pointer = value_type *;
-      using reference = value_type &;
-      using iterator_category = std::forward_iterator_tag;
-    private:
-      Decls Ptr = nullptr;
-      ListNodeIterator(Decls Node) : Ptr(Node) { }
-      bool isNamedDecl() const { return Ptr.dyn_cast<NamedDecl*>(); }
-    public:
-      ListNodeIterator() = default;
-      // Converting ctor from non-const iterators to const iterators. SFINAE'd
-      // out for const iterator destinations so it doesn't end up as a user
-      // defined copy constructor.
-      template <bool IsConstSrc,
-                class = std::enable_if_t<!IsConstSrc && IsConst>>
-      ListNodeIterator(const ListNodeIterator<IsConstSrc> &I) : Ptr(I.Ptr) {}
-
-      reference operator*() const {
-        assert(Ptr && "dereferencing end() iterator");
-        // FIXME: Remove the const_casts...
-        if (isNamedDecl())
-          return *(const_cast<NamedDecl**>(Ptr.getAddrOfPtr1()));
-        return Ptr.get<ListNode*>()->D;
-      }
-      pointer operator->() const {
-        assert(Ptr && "dereferencing end() iterator");
-        return isNamedDecl() ? Ptr.getAddrOfPtr1() : &Ptr.get<ListNode*>()->D;
-      }
-      bool operator==(const ConstIterator &X) const { return Ptr == X.Ptr; }
-      bool operator!=(const ConstIterator &X) const { return Ptr != X.Ptr; }
-      inline ListNodeIterator& operator++() { // ++It
-        assert(!Ptr.isNull() && "Advancing empty iterator");
-        assert((Ptr.dyn_cast<NamedDecl*>() || Ptr.dyn_cast<ListNode*>()) &&
-               "Advancing empty iterator");
-
-        Ptr = !isNamedDecl() ? Ptr.get<ListNode*>()->Rest : nullptr;
-        return *this;
-      }
-      ListNodeIterator operator++(int) { // It++
-        ListNodeIterator temp = *this;
-        ++(*this);
-        return temp;
-      }
-    };
-    using iterator = ListNodeIterator</*IsConst = */ false>;
-    using const_iterator = ListNodeIterator</*IsConst = */ true>;
-
-    iterator begin() { return empty() ? end() : iterator(this); }
-    iterator end() { return iterator(); }
-
-    // const_iterator begin() { return empty() ? end() : const_iterator(this); }
-    // const_iterator end() const { return const_iterator(); }
-
-    void push_back(NamedDecl *ND) {
-      assert(D && "No need to call push_back");
-      ListNode *Node = new ListNode(ND);
-
-      ListNode *Prev = this;
-      while(Prev->Rest)
-        Prev = Prev->Rest.get<ListNode*>();
-
-      Prev->Rest = Node;
-    }
-
-    template<typename Pred>
-    void erase_if(Pred pred) {
-      ListNode *Prev = this;
-      if (D && Rest.isNull()) {
-        if (!pred(D))
-          D = nullptr;
-        return;
-      }
-
-      while(Prev && !Prev->Rest.isNull() &&
-            !pred(Prev->Rest.get<ListNode*>()->D))
-        Prev = Prev->Rest.get<ListNode*>();
-
-      assert(Prev && "list does not contain decl");
-      if (Prev->Rest.isNull())
-        return;
-      ListNode *ToDelete = Prev->Rest.get<ListNode*>();
-      Prev->Rest = ToDelete->Rest;
-      delete ToDelete;
-    }
-
-    void erase(NamedDecl *ND) {
-      erase_if([ND](NamedDecl *D){ return D == ND; });
-    }
-  };
-
   Decls Result = nullptr;
 
 public:
   DeclContextLookupResult() = default;
   DeclContextLookupResult(Decls Result) : Result(Result) {}
 
-  using iterator = ListNode::ListNodeIterator</*IsConst = */ false>;
-  // FIXME: Add a proper const iterator
-  //using const_iterator = ListNode::ListNodeIterator</*IsConst = */ true>;
+  using iterator = DeclListNode::iterator;
   using const_iterator = iterator;
   using reference = iterator::reference;
 
-  iterator begin() {
-    if (empty())
-      return end();
-    return iterator(Result);
-  }
+  iterator begin() { return empty() ? end() : iterator(Result); }
   iterator end() { return iterator(); }
   const_iterator begin() const {
     return const_cast<DeclContextLookupResult*>(this)->begin();
   }
   const_iterator end() const { return iterator(); }
 
-  bool empty() const {
-    if (Result.isNull())
-      return true;
-    // Might have been prepared to be filled later (see setHasExternalDecls).
-    if (Result.dyn_cast<NamedDecl*>() || !Result.get<ListNode*>()->empty())
-      return false;
-    return true;
-  }
+  bool empty() const { return Result.isNull();  }
   bool isSingleResult() const {
     return !empty() && Result.dyn_cast<NamedDecl*>();
   }
-  bool equals(const DeclContextLookupResult &RHS) const {
-    if (empty() && RHS.empty())
-      return true;
-    if (isSingleResult() == RHS.isSingleResult())
-      return true;
-
-    //FIXME: We should probably copy, sort and compare one by one.
-    DeclContextLookupResult X = *this;
-    DeclContextLookupResult Y = RHS;
-    return std::distance(X.begin(), X.end()) ==
-      std::distance(Y.begin(), Y.end());
-  }
-
   reference front() const { return *begin(); }
+
   // FIXME: Remove this from the interface
   DeclContextLookupResult slice(size_t N) const {
     assert(N <= (size_t)std::distance(begin(), end()));
@@ -1395,6 +1324,14 @@ public:
 
     DeclContextLookupResult Sliced(I.Ptr);
     return Sliced;
+  }
+
+  template<class T> T *find_first() const {
+    for (auto *D : *this)
+      if (T* Decl = dyn_cast<T>(D))
+        return Decl;
+
+    return nullptr;
   }
 };
 

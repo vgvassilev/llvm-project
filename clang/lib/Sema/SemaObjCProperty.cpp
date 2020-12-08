@@ -1147,14 +1147,13 @@ Decl *Sema::ActOnPropertyImplDecl(Scope *S,
       // redeclared 'readwrite', then no warning is to be issued.
       for (auto *Ext : IDecl->known_extensions()) {
         DeclContext::lookup_result R = Ext->lookup(property->getDeclName());
-        if (!R.empty())
-          if (auto *ExtProp = dyn_cast<ObjCPropertyDecl>(R.front())) {
-            PIkind = ExtProp->getPropertyAttributesAsWritten();
-            if (PIkind & ObjCPropertyAttribute::kind_readwrite) {
-              ReadWriteProperty = true;
-              break;
-            }
+        if (auto *ExtProp = R.find_first<ObjCPropertyDecl>()) {
+          PIkind = ExtProp->getPropertyAttributesAsWritten();
+          if (PIkind & ObjCPropertyAttribute::kind_readwrite) {
+            ReadWriteProperty = true;
+            break;
           }
+        }
       }
 
       if (!ReadWriteProperty) {
