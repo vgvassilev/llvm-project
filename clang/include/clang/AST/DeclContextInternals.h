@@ -84,14 +84,7 @@ public:
   }
 
   void setHasExternalDecls() {
-    if (DeclsTy *Vec = getAsVector())
-      Data = DeclsAndHasExternalTy(Vec, true);
-    else {
-      DeclsTy *VT = new DeclsTy(nullptr);
-      if (NamedDecl *OldD = getAsDecl())
-        VT->push_back(OldD);
-      Data = DeclsAndHasExternalTy(VT, true);
-    }
+    Data.setInt(1);
   }
 
   void setOnlyValue(NamedDecl *ND) {
@@ -132,7 +125,10 @@ public:
       Vec.erase_if([](NamedDecl *ND){ return ND->isFromASTFile(); });
 
       // Don't have any external decls any more.
-      Data = DeclsAndHasExternalTy(&Vec, false);
+      if (Vec.empty())
+        Data = DeclsAndHasExternalTy((DeclsTy *) nullptr, false);
+      else
+        Data = DeclsAndHasExternalTy(&Vec, false);
     }
   }
 

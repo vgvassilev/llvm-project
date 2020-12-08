@@ -1940,7 +1940,10 @@ void DeclContext::makeDeclVisibleInContextImpl(NamedDecl *D, bool Internal) {
     // In this case, we never try to replace an existing declaration; we'll
     // handle that when we finalize the list of declarations for this name.
     DeclNameEntries.setHasExternalDecls();
-    DeclNameEntries.AddSubsequentDecl(D);
+    if (DeclNameEntries.isNull())
+      DeclNameEntries.setOnlyValue(D);
+    else
+      DeclNameEntries.AddSubsequentDecl(D);
     return;
   }
 

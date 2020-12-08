@@ -1240,17 +1240,6 @@ class DeclContextLookupResult {
       return !D && Rest.isNull();
     }
 
-    void push_back(NamedDecl *ND) {
-      assert(D && "No need to call push_back");
-      ListNode *Node = new ListNode(ND);
-
-      ListNode *Prev = this;
-      while(Prev->Rest)
-        Prev = Prev->Rest.get<ListNode*>();
-
-      Prev->Rest = Node;
-    }
-
     template<bool IsConst>
     class ListNodeIterator {
       friend class ListNode;
@@ -1306,23 +1295,39 @@ class DeclContextLookupResult {
     using iterator = ListNodeIterator</*IsConst = */ false>;
     using const_iterator = ListNodeIterator</*IsConst = */ true>;
 
-    iterator begin() {
-      if(empty())
-        return end();
-      return iterator(this);
-    }
+    iterator begin() { return empty() ? end() : iterator(this); }
     iterator end() { return iterator(); }
 
-    // const_iterator begin() const { return const_iterator(this); }
+    // const_iterator begin() { return empty() ? end() : const_iterator(this); }
     // const_iterator end() const { return const_iterator(); }
+
+    void push_back(NamedDecl *ND) {
+      assert(D && "No need to call push_back");
+      ListNode *Node = new ListNode(ND);
+
+      ListNode *Prev = this;
+      while(Prev->Rest)
+        Prev = Prev->Rest.get<ListNode*>();
+
+      Prev->Rest = Node;
+    }
 
     template<typename Pred>
     void erase_if(Pred pred) {
       ListNode *Prev = this;
-      while(Prev && !pred(Prev->Rest.get<ListNode*>()->D))
+      if (D && Rest.isNull()) {
+        if (!pred(D))
+          D = nullptr;
+        return;
+      }
+
+      while(Prev && !Prev->Rest.isNull() &&
+            !pred(Prev->Rest.get<ListNode*>()->D))
         Prev = Prev->Rest.get<ListNode*>();
 
       assert(Prev && "list does not contain decl");
+      if (Prev->Rest.isNull())
+        return;
       ListNode *ToDelete = Prev->Rest.get<ListNode*>();
       Prev->Rest = ToDelete->Rest;
       delete ToDelete;
@@ -1369,8 +1374,6 @@ public:
   }
   bool equals(const DeclContextLookupResult &RHS) const {
     if (empty() && RHS.empty())
-      return true;
-    if (empty() == RHS.empty())
       return true;
     if (isSingleResult() == RHS.isSingleResult())
       return true;
