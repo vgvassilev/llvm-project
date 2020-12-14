@@ -76,9 +76,18 @@ public:
 
   CXXBasePath() = default;
 
-  /// The set of declarations found inside this base class
-  /// subobject.
-  DeclContext::lookup_result Decls;
+  /// The declarations found inside this base class subobject.
+  class DeclRange {
+  public:
+    using lookup_iterator = DeclContext::lookup_iterator;
+    DeclRange() = default;
+    DeclRange(lookup_iterator &B) : B(B) {}
+    void operator=(lookup_iterator It) { B = It; }
+    lookup_iterator begin() const { return B; }
+    lookup_iterator end() const { return lookup_iterator(); }
+  private:
+    lookup_iterator B;
+  } Decls;
 
   void clear() {
     SmallVectorImpl<CXXBasePathElement>::clear();

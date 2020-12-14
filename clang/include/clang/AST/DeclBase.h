@@ -1315,17 +1315,6 @@ public:
   }
   reference front() const { return *begin(); }
 
-  // FIXME: Remove this from the interface
-  DeclContextLookupResult slice(size_t N) const {
-    assert(N <= (size_t)std::distance(begin(), end()));
-    auto I = begin();
-    while(N--)
-      ++I;
-
-    DeclContextLookupResult Sliced(I.Ptr);
-    return Sliced;
-  }
-
   template<class T> T *find_first() const {
     for (auto *D : *this)
       if (T* Decl = dyn_cast<T>(D))

@@ -2191,9 +2191,10 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
     CXXRecordDecl *BaseRecord = Specifier->getType()->getAsCXXRecordDecl();
     // Drop leading non-matching lookup results from the declaration list so
     // we don't need to consider them again below.
-    for (Path.Decls = BaseRecord->lookup(Name); !Path.Decls.empty();
-         Path.Decls = Path.Decls.slice(1)) {
-      if (Path.Decls.front()->isInIdentifierNamespace(IDNS))
+    for (auto I = BaseRecord->lookup(Name).begin(), E = std::end(Path.Decls);
+         I != E; ++I) {
+      Path.Decls = I;
+      if ((*I)->isInIdentifierNamespace(IDNS))
         return true;
     }
     return false;
@@ -2217,7 +2218,7 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
   AccessSpecifier SubobjectAccess = AS_none;
 
   // Check whether the given lookup result contains only static members.
-  auto HasOnlyStaticMembers = [&](DeclContextLookupResult Result) {
+  auto HasOnlyStaticMembers = [&](CXXBasePath::DeclRange Result) {
     for (NamedDecl *ND : Result)
       if (ND->isInIdentifierNamespace(IDNS) && ND->isCXXInstanceMember())
         return false;
@@ -2228,8 +2229,8 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
 
   // Determine whether two sets of members contain the same members, as
   // required by C++ [class.member.lookup]p6.
-  auto HasSameDeclarations = [&](DeclContextLookupResult A,
-                                 DeclContextLookupResult B) {
+  auto HasSameDeclarations = [&](CXXBasePath::DeclRange A,
+                                 CXXBasePath::DeclRange B) {
     using Iterator = DeclContextLookupResult::iterator;
     using Result = const void *;
 
@@ -2513,7 +2514,7 @@ void Sema::DiagnoseAmbiguousLookup(LookupResult &Result) {
     for (CXXBasePaths::paths_iterator Path = Paths->begin(),
                                       PathEnd = Paths->end();
          Path != PathEnd; ++Path) {
-      const NamedDecl *D = Path->Decls.front();
+      const NamedDecl *D = *Path->Decls.begin();
       if (!D->isInIdentifierNamespace(Result.getIdentifierNamespace()))
         continue;
       if (DeclsPrinted.insert(D).second) {

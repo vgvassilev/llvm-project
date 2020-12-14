@@ -9640,9 +9640,10 @@ public:
 
     bool foundSameNameMethod = false;
     SmallVector<CXXMethodDecl *, 8> overloadedMethods;
-    for (Path.Decls = BaseRecord->lookup(Name); !Path.Decls.empty();
-         Path.Decls = Path.Decls.slice(1)) {
-      NamedDecl *D = Path.Decls.front();
+    for (auto I = BaseRecord->lookup(Name).begin(), E = std::end(Path.Decls);
+         I != E; ++I) {
+      Path.Decls = I;
+      NamedDecl *D = *I;
       if (CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(D)) {
         MD = MD->getCanonicalDecl();
         foundSameNameMethod = true;

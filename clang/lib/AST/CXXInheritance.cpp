@@ -386,7 +386,7 @@ static bool isOrdinaryMember(const NamedDecl *ND) {
 
 static bool findOrdinaryMember(const CXXRecordDecl *RD, CXXBasePath &Path,
                                DeclarationName Name) {
-  Path.Decls = RD->lookup(Name);
+  Path.Decls = RD->lookup(Name).begin();
   for (NamedDecl *ND : Path.Decls)
     if (isOrdinaryMember(ND))
       return true;
