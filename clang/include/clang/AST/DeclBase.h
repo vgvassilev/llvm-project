@@ -1249,12 +1249,8 @@ private:
 
     reference operator*() const {
       assert(Ptr && "dereferencing end() iterator");
-      if (DeclListNode *CurNode = Ptr.dyn_cast<DeclListNode*>()) {
-        if (NamedDecl *ND = CurNode->Rest.dyn_cast<NamedDecl*>())
-          return ND;
-        else
-          return CurNode->D;
-      }
+      if (DeclListNode *CurNode = Ptr.dyn_cast<DeclListNode*>())
+        return CurNode->D;
       return Ptr.get<NamedDecl*>();
     }
     pointer operator->() const { return operator*(); }
@@ -1266,13 +1262,12 @@ private:
              "Advancing empty iterator");
 
       if (DeclListNode *CurNode = Ptr.dyn_cast<DeclListNode*>()) {
-        if (CurNode->Rest.is<NamedDecl*>())
-          Ptr = CurNode->D;
+        if (CurNode->Rest.is<NamedDecl*>()) // last node
+          Ptr = CurNode->Rest.get<NamedDecl*>();
         else
           Ptr = CurNode->Rest;
-      } else {
+      } else
         Ptr = nullptr;
-      }
       return *this;
     }
     DeclListIterator operator++(int) { // It++
@@ -1292,11 +1287,16 @@ class DeclContextLookupResult {
   using Decls = DeclListNode::Decls;
 
   /// When in collection form, this is what the Data pointer points to.
-  Decls Result = nullptr;
+  Decls Result;
 
 public:
   DeclContextLookupResult() = default;
   DeclContextLookupResult(Decls Result) : Result(Result) {}
+  // DeclContextLookupResult(Decls *Result) : Result(*Result) {}
+  // DeclContextLookupResult &operator=(const DeclContextLookupResult &X) {
+  //   Result = X.Result;
+  //   return *this;
+  // }
 
   using iterator = DeclListNode::iterator;
   using const_iterator = iterator;

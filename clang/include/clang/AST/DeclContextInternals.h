@@ -70,9 +70,9 @@ class StoredDeclsList {
       Data.setPointer(Node);
       return;
     }
-
-    // assert(llvm::find(*getAsVector(), ND) == std::end(*getAsVector()) &&
-    //        "list still contains decl");
+    // auto Vec = DeclContext::lookup_result(Data.getPointer());
+    // (void)Vec;
+    // assert(llvm::find(Vec, ND) == Vec.end() && "list still contains decl");
     Node->Rest = Data.getPointer();
     Data.setPointer(Node);
   }
@@ -170,7 +170,6 @@ public:
     return getAsVectorAndHasExternal().getPointer().dyn_cast<DeclsTy*>();
   }
 
-
   bool hasExternalDecls() const {
     return getAsVectorAndHasExternal().getInt();
   }
@@ -207,7 +206,9 @@ public:
 
   /// getLookupResult - Return an array of all the decls that this list
   /// represents.
-  DeclContext::lookup_result getLookupResult() {
+  DeclContext::lookup_result getLookupResult() const {
+    if (isNull())
+      return DeclContext::lookup_result();
     return DeclContext::lookup_result(Data.getPointer());
   }
 
@@ -223,24 +224,16 @@ public:
     }
 
     // Determine if this declaration is actually a redeclaration.
-    DeclsTy &Vec = *getAsVector();
-    while (DeclsTy *Next = Vec.Rest.dyn_cast<DeclsTy*>()) {
-      if (D->declarationReplaces(Vec.D, IsKnownNewer)) {
-        Vec.D = D;
+    for (DeclsTy* N = getAsVector(); N; N = N->Rest.dyn_cast<DeclsTy*>()) {
+      if (D->declarationReplaces(N->D, IsKnownNewer)) {
+        N->D = D;
         return true;
       }
-      Vec = *Next;
-    }
-
-    // Handle the two element case.
-    if (D->declarationReplaces(Vec.Rest.get<NamedDecl*>(), IsKnownNewer)) {
-      Vec.Rest = D;
-      return true;
-    }
-
-    if (D->declarationReplaces(Vec.D, IsKnownNewer)) {
-      Vec.D = D;
-      return true;
+      if (auto *ND = N->Rest.dyn_cast<NamedDecl*>()) // the two element case
+        if (D->declarationReplaces(ND, IsKnownNewer)) {
+          N->Rest = ND;
+          return true;
+        }
     }
 
     return false;
