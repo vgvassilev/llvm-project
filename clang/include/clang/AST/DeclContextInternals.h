@@ -64,13 +64,12 @@ class StoredDeclsList {
     // pointer to the next to point to OldD. This way we save an extra
     // allocation.
     if (NamedDecl *OldD = getAsDecl()) {
-      // FIXME: Enable both asserts...
-      //assert(OldD != ND && "list already contains decl");
+      // assert(OldD != ND && "list already contains decl");
       Node->Rest = OldD;
       Data.setPointer(Node);
       return;
     }
-    // auto Vec = DeclContext::lookup_result(Data.getPointer());
+    // auto Vec = getLookupResult();
     // (void)Vec;
     // assert(llvm::find(Vec, ND) == Vec.end() && "list still contains decl");
     Node->Rest = Data.getPointer();
@@ -79,43 +78,36 @@ class StoredDeclsList {
 
   template<typename Pred>
   void erase_if(Pred pred) {
-    DeclsTy *Prev = getAsVector();
-    assert(Prev && "Not in list mode!");
-
-    ASTContext &C = getASTContext();
-    DeclsTy *Next = Prev;
-    while(Next->Rest.dyn_cast<DeclsTy*>()) {
-      if (pred(Next->D)) {
-        Prev->Rest = Next->Rest;
-        // FIXME: Move after assigning from Next.Rest
-        //C.DeallocateDeclListNode(Next);
-      }
-
-      Next = Next->Rest.get<DeclsTy*>();
-      if (Next->Rest.dyn_cast<DeclsTy*>())
-        Prev = Next;
-    }
-
-    // The last element's Rest points to a NamedDecl to save space.
-    NamedDecl *ND = Next->Rest.get<NamedDecl*>();
-    if (Prev == Next) {
+    assert(getAsVector() && "Not in list mode!");
+    auto Dealloc = [this](DeclsTy *P, DeclsTy *N, NamedDecl *ND) {
+      ASTContext &C = getASTContext();
       // Switch to single element if only one item in the list is left.
-      if (pred(ND)) {
-        Data.setPointer(Next->D);
-        C.DeallocateDeclListNode(Next);
-      } else if (pred(Next->D)) {
-        Data.setPointer(ND);
-        C.DeallocateDeclListNode(Next);
+      if (N == getAsVector())
+        Data.setPointer(N->D == ND ? N->Rest : N->D);
+      else if (ND == getAsDecl())
+        Data.setPointer(nullptr);
+      else {
+        P->Rest = N->Rest;
+        C.DeallocateDeclListNode(N);
       }
-    } else {
-      if (pred(ND)) {
-        Prev->Rest = Next->D;
-        C.DeallocateDeclListNode(Next);
-      } else if (pred(Next->D)) {
-        Prev->Rest = ND;
-        C.DeallocateDeclListNode(Next);
+    };
+
+    for (auto N = getAsVector(), Prev = N; N;N = N->Rest.dyn_cast<DeclsTy*>()) {
+      if (pred(N->D))
+        Dealloc(Prev, N, N->D);
+      else
+        Prev = N;
+      if (NamedDecl *ND = N->Rest.dyn_cast<NamedDecl*>()) { // two element case
+        if (pred(ND))
+          Dealloc(Prev, N, ND);
+        else
+          Prev = N;
       }
     }
+
+
+    assert(llvm::find_if(getLookupResult(), pred) == getLookupResult().end() &&
+           "Still exists!");
   }
 
   void erase(NamedDecl *ND) {

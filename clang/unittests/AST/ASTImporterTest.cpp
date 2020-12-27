@@ -3965,8 +3965,8 @@ TEST_P(DeclContextTest,
   // one we are going to delete from the DC later.
   L.setHasExternalDecls();
   ASSERT_TRUE(L.getAsVector());
-  auto Results = L.getAsVector();
-  ASSERT_EQ(1u, std::distance(Results->begin(), Results->end()));
+  auto Results = L.getLookupResult();
+  ASSERT_EQ(1u, std::distance(Results.begin(), Results.end()));
 
   // This asserts in the old implementation.
   DC->removeDecl(A0);
