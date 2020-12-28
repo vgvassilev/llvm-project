@@ -79,32 +79,31 @@ class StoredDeclsList {
   template<typename Pred>
   void erase_if(Pred pred) {
     assert(getAsVector() && "Not in list mode!");
-    auto Dealloc = [this](DeclsTy *P, DeclsTy *N, NamedDecl *ND) {
-      ASTContext &C = getASTContext();
-      // Switch to single element if only one item in the list is left.
-      if (N == getAsVector())
-        Data.setPointer(N->D == ND ? N->Rest : N->D);
-      else if (ND == getAsDecl())
-        Data.setPointer(nullptr);
-      else {
-        P->Rest = N->Rest;
-        C.DeallocateDeclListNode(N);
-      }
-    };
-
-    for (auto N = getAsVector(), Prev = N; N;N = N->Rest.dyn_cast<DeclsTy*>()) {
-      if (pred(N->D))
-        Dealloc(Prev, N, N->D);
-      else
-        Prev = N;
-      if (NamedDecl *ND = N->Rest.dyn_cast<NamedDecl*>()) { // two element case
-        if (pred(ND))
-          Dealloc(Prev, N, ND);
-        else
-          Prev = N;
+    ASTContext &C = getASTContext();
+    for (Decls N = Data.getPointer(), Prev = N; N; ) {
+      if (DeclsTy *L = N.dyn_cast<DeclsTy*>()) {
+        if (pred(L->D)) {
+          if (L == getAsVector())
+            Data.setPointer(L->Rest);
+          else
+            Prev.get<DeclsTy*>()->Rest = L->Rest;
+          N = L->Rest;
+          C.DeallocateDeclListNode(L);
+        } else {
+          N = L->Rest;
+          Prev = L;
+        }
+      } else {
+        NamedDecl *ND = N.get<NamedDecl*>();
+        if (pred(ND)) {
+          if (getAsDecl())
+            Data.setPointer(nullptr);
+          else
+            Prev.get<DeclsTy*>()->Rest = nullptr;
+        }
+        break;
       }
     }
-
 
     assert(llvm::find_if(getLookupResult(), pred) == getLookupResult().end() &&
            "Still exists!");
@@ -240,6 +239,22 @@ public:
     }
 
     push_front(D);
+  }
+
+  LLVM_DUMP_METHOD void dump() const {
+    for (auto *ND : getLookupResult())
+      llvm::errs() << ND->getNameAsString() << " " << ND << "\n";
+    llvm::errs() << "---\n";
+    for (Decls N = Data.getPointer(); N; ) {
+      if (DeclsTy *L = N.dyn_cast<DeclsTy*>()) {
+        llvm::errs() << L->D->getNameAsString() << " " << L->D << "\n";
+        N = L->Rest;
+      } else {
+        NamedDecl *ND = N.get<NamedDecl*>();
+        llvm::errs() << ND->getNameAsString() << " " << ND << "\n";
+        break;
+      }
+    }
   }
 };
 

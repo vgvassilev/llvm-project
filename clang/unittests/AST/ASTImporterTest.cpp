@@ -3961,10 +3961,9 @@ TEST_P(DeclContextTest,
 
   ASSERT_TRUE(L.getAsDecl());
   // Simulate the private function DeclContext::reconcileExternalVisibleStorage.
-  // The point here is to have a Vec with only one element, which is not the
-  // one we are going to delete from the DC later.
+  // We do not have a Vec with one element.
   L.setHasExternalDecls();
-  ASSERT_TRUE(L.getAsVector());
+  ASSERT_FALSE(L.getAsVector());
   auto Results = L.getLookupResult();
   ASSERT_EQ(1u, std::distance(Results.begin(), Results.end()));
 
