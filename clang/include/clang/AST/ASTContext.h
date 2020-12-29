@@ -651,6 +651,7 @@ public:
   DeclListNode *AllocateDeclListNode(clang::NamedDecl *ND) {
     if (DeclListNode *Alloc = ListNodeFreeList) {
       ListNodeFreeList = Alloc->Rest.dyn_cast<DeclListNode*>();
+      Alloc->D = ND;
       return Alloc;
     }
     return new (*this) DeclListNode(ND);

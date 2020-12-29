@@ -3963,7 +3963,7 @@ TEST_P(DeclContextTest,
   // Simulate the private function DeclContext::reconcileExternalVisibleStorage.
   // We do not have a Vec with one element.
   L.setHasExternalDecls();
-  ASSERT_FALSE(L.getAsVector());
+  ASSERT_FALSE(L.getAsList());
   auto Results = L.getLookupResult();
   ASSERT_EQ(1u, std::distance(Results.begin(), Results.end()));
 

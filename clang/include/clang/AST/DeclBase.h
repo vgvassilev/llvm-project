@@ -1292,11 +1292,6 @@ class DeclContextLookupResult {
 public:
   DeclContextLookupResult() = default;
   DeclContextLookupResult(Decls Result) : Result(Result) {}
-  // DeclContextLookupResult(Decls *Result) : Result(*Result) {}
-  // DeclContextLookupResult &operator=(const DeclContextLookupResult &X) {
-  //   Result = X.Result;
-  //   return *this;
-  // }
 
   using iterator = DeclListNode::iterator;
   using const_iterator = iterator;

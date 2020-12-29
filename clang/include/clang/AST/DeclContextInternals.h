@@ -40,12 +40,12 @@ class StoredDeclsList {
   using DeclsAndHasExternalTy = llvm::PointerIntPair<Decls, 1, bool>;
 
   /// The stored data, which will be either a pointer to a NamedDecl,
-  /// or a pointer to a vector with a flag to indicate if there are further
+  /// or a pointer to a list with a flag to indicate if there are further
   /// external declarations.
   DeclsAndHasExternalTy Data;
 
   void setOnlyValue(NamedDecl *ND) {
-    assert(!getAsVector() && "Not inline");
+    assert(!getAsList() && "Not inline");
     Data.setPointer(ND);
     Data.setInt(0);
     // Make sure that Data is a plain NamedDecl* so we can use its address
@@ -64,26 +64,32 @@ class StoredDeclsList {
     // pointer to the next to point to OldD. This way we save an extra
     // allocation.
     if (NamedDecl *OldD = getAsDecl()) {
-      // assert(OldD != ND && "list already contains decl");
-      Node->Rest = OldD;
+      //assert(OldD != ND && "list already contains decl");
+      Node->Rest = Node->D;
+      Node->D = OldD;
       Data.setPointer(Node);
       return;
     }
     // auto Vec = getLookupResult();
     // (void)Vec;
     // assert(llvm::find(Vec, ND) == Vec.end() && "list still contains decl");
-    Node->Rest = Data.getPointer();
-    Data.setPointer(Node);
+    DeclsTy *Cur = getAsList();
+    while(Cur->Rest.dyn_cast<DeclsTy*>())
+      Cur = Cur->Rest.get<DeclsTy*>();
+    Node->Rest = Cur->Rest;
+    Cur->Rest = Node;
+    // Node->Rest = Data.getPointer();
+    // Data.setPointer(Node);
   }
 
   template<typename Pred>
   void erase_if(Pred pred) {
-    assert(getAsVector() && "Not in list mode!");
+    assert(getAsList() && "Not in list mode!");
     ASTContext &C = getASTContext();
     for (Decls N = Data.getPointer(), Prev = N; N; ) {
       if (DeclsTy *L = N.dyn_cast<DeclsTy*>()) {
         if (pred(L->D)) {
-          if (L == getAsVector())
+          if (L == getAsList())
             Data.setPointer(L->Rest);
           else
             Prev.get<DeclsTy*>()->Rest = L->Rest;
@@ -121,19 +127,26 @@ public:
     RHS.Data.setInt(0);
   }
 
-  ~StoredDeclsList() {
-    // If this is a vector-form, free the vector.
-    if (DeclsTy *Vector = getAsVector()) {
-      ASTContext &C = getASTContext();
-      C.DeallocateDeclListNode(Vector);
+  void MaybeDeallocList() {
+    if (isNull())
+      return;
+    // If this is a list-form, free the list.
+    ASTContext &C = getASTContext();
+    Decls List = Data.getPointer();
+    while(List.is<DeclsTy*>()) {
+      DeclsTy *ToDealloc = List.get<DeclsTy*>();
+      List = ToDealloc->Rest;
+      C.DeallocateDeclListNode(ToDealloc);
     }
   }
 
+  ~StoredDeclsList() {
+    MaybeDeallocList();
+  }
+
   StoredDeclsList &operator=(StoredDeclsList &&RHS) {
-    if (DeclsTy *Vector = getAsVector()) {
-      ASTContext &C = getASTContext();
-      C.DeallocateDeclListNode(Vector);
-    }
+    MaybeDeallocList();
+
     Data = RHS.Data;
     RHS.Data.setPointer(nullptr);
     RHS.Data.setInt(0);
@@ -146,23 +159,21 @@ public:
     assert(!isNull() && "No ASTContext.");
     if (NamedDecl *ND = getAsDecl())
       return ND->getASTContext();
-    return getAsVector()->D->getASTContext();
+    return getAsList()->D->getASTContext();
   }
 
-  DeclsAndHasExternalTy getAsVectorAndHasExternal() const {
-    return Data;
-  }
+  DeclsAndHasExternalTy getAsListAndHasExternal() const { return Data; }
 
   NamedDecl *getAsDecl() const {
-    return getAsVectorAndHasExternal().getPointer().dyn_cast<NamedDecl *>();
+    return getAsListAndHasExternal().getPointer().dyn_cast<NamedDecl *>();
   }
 
-  DeclsTy *getAsVector() const {
-    return getAsVectorAndHasExternal().getPointer().dyn_cast<DeclsTy*>();
+  DeclsTy *getAsList() const {
+    return getAsListAndHasExternal().getPointer().dyn_cast<DeclsTy*>();
   }
 
   bool hasExternalDecls() const {
-    return getAsVectorAndHasExternal().getInt();
+    return getAsListAndHasExternal().getInt();
   }
 
   void setHasExternalDecls() {
@@ -180,8 +191,7 @@ public:
     erase(D);
   }
 
-  /// Remove any declarations which were imported from an external
-  /// AST source.
+  /// Remove any declarations which were imported from an external AST source.
   void removeExternalDecls() {
     if (isNull()) {
       // Nothing to do.
@@ -204,7 +214,7 @@ public:
   }
 
   /// HandleRedeclaration - If this is a redeclaration of an existing decl,
-  /// replace the old one with D and return true.  Otherwise return false.
+  /// replace the old one with D and return true. Otherwise return false.
   bool HandleRedeclaration(NamedDecl *D, bool IsKnownNewer) {
     // Most decls only have one entry in their list, special case it.
     if (NamedDecl *OldD = getAsDecl()) {
@@ -215,14 +225,14 @@ public:
     }
 
     // Determine if this declaration is actually a redeclaration.
-    for (DeclsTy* N = getAsVector(); N; N = N->Rest.dyn_cast<DeclsTy*>()) {
+    for (DeclsTy* N = getAsList(); N; N = N->Rest.dyn_cast<DeclsTy*>()) {
       if (D->declarationReplaces(N->D, IsKnownNewer)) {
         N->D = D;
         return true;
       }
       if (auto *ND = N->Rest.dyn_cast<NamedDecl*>()) // the two element case
         if (D->declarationReplaces(ND, IsKnownNewer)) {
-          N->Rest = ND;
+          N->Rest = D;
           return true;
         }
     }
