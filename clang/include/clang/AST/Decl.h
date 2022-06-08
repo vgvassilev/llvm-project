@@ -4252,6 +4252,44 @@ public:
   static bool classofKind(Kind K) { return K == FileScopeAsm; }
 };
 
+/// A declaration that models statements at global scope. This declaration
+/// supports incremental and interactive C/C++.
+///
+/// \note This is used in libInterpreter, clang -cc1 -fincremental-extensions
+/// and in tools such as clang-repl.
+class TopLevelStmtDecl : public Decl {
+  friend class ASTDeclReader;
+  friend class ASTDeclWriter;
+
+  Stmt **Stmts = nullptr;
+  unsigned NumStmts = 0;
+  FunctionDecl *FD = nullptr;
+
+  TopLevelStmtDecl(DeclContext *DC, SourceLocation L)
+      : Decl(TopLevelStmt, DC, L) {}
+
+  void setStmts(ASTContext &C, ArrayRef<Stmt *> Statements) {
+    assert(!Statements.empty());
+    Stmts = new (C) Stmt *[Statements.size()];
+    std::uninitialized_copy(Statements.begin(), Statements.end(), Stmts);
+    NumStmts = Statements.size();
+  }
+
+  virtual void anchor();
+
+public:
+  static TopLevelStmtDecl *Create(ASTContext &C, ArrayRef<Stmt *> Stmts);
+  static TopLevelStmtDecl *CreateDeserialized(ASTContext &C, unsigned ID);
+
+  SourceRange getSourceRange() const override LLVM_READONLY;
+  FunctionDecl *getOrConvertToFunction();
+  ArrayRef<Stmt *> statements() { return {Stmts, NumStmts}; }
+  ArrayRef<const Stmt *> statements() const { return {Stmts, NumStmts}; }
+
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == TopLevelStmt; }
+};
+
 /// Represents a block literal declaration, which is like an
 /// unnamed FunctionDecl.  For example:
 /// ^{ statement-body }   or   ^(int arg1, float arg2){ statement-body }

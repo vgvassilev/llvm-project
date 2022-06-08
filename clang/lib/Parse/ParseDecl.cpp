@@ -5388,6 +5388,25 @@ bool Parser::isTypeSpecifierQualifier() {
   }
 }
 
+Decl *Parser::ParseTopLevelStmtDecl() {
+  if (!PP.isIncrementalProcessingEnabled())
+    return nullptr;
+
+  // Parse a top-level-stmt.
+  Parser::StmtVector Stmts;
+  ParsedStmtContext SubStmtCtx = ParsedStmtContext();
+  StmtResult R = ParseStatementOrDeclaration(Stmts, SubStmtCtx);
+  if (!R.isUsable())
+    return nullptr;
+
+  Stmts.push_back(R.get());
+
+  if (!Stmts.empty())
+    return Actions.ActOnTopLevelStmtDecl(Stmts);
+
+  return nullptr;
+}
+
 /// isDeclarationSpecifier() - Return true if the current token is part of a
 /// declaration specifier.
 ///

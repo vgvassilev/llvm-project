@@ -476,6 +476,11 @@ public:
     Visit(D->getAsmString());
   }
 
+  void VisitTopLevelStmtDecl(const TopLevelStmtDecl *D) {
+    for (const Stmt *S : D->statements())
+      Visit(S);
+  }
+
   void VisitCapturedDecl(const CapturedDecl *D) { Visit(D->getBody()); }
 
   void VisitOMPThreadPrivateDecl(const OMPThreadPrivateDecl *D) {

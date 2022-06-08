@@ -1025,8 +1025,16 @@ Parser::DeclGroupPtrTy Parser::ParseExternalDeclaration(ParsedAttributes &Attrs,
       ConsumeToken();
       return nullptr;
     }
+    // FIXME: Remove the incremental processing pre-condition and verify clang
+    // still can pass its test suite, which will harden
+    // `isDeclarationStatement`.
+    if (PP.isIncrementalProcessingEnabled() &&
+        !isDeclarationStatement(/*DisambiguatingWithExpression=*/true))
+      SingleDecl = ParseTopLevelStmtDecl();
+
     // We can't tell whether this is a function-definition or declaration yet.
-    return ParseDeclarationOrFunctionDefinition(Attrs, DS);
+    if (!SingleDecl)
+      return ParseDeclarationOrFunctionDefinition(Attrs, DS);
   }
 
   // This routine returns a DeclGroup, if the thing we parsed only contains a

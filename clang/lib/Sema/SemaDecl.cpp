@@ -19549,6 +19549,12 @@ Decl *Sema::ActOnFileScopeAsmDecl(Expr *expr,
   return New;
 }
 
+Decl *Sema::ActOnTopLevelStmtDecl(const SmallVectorImpl<Stmt *> &Stmts) {
+  auto *New = TopLevelStmtDecl::Create(Context, Stmts);
+  Context.getTranslationUnitDecl()->addDecl(New);
+  return New;
+}
+
 void Sema::ActOnPragmaRedefineExtname(IdentifierInfo* Name,
                                       IdentifierInfo* AliasName,
                                       SourceLocation PragmaLoc,

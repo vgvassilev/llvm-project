@@ -5236,6 +5236,54 @@ FileScopeAsmDecl *FileScopeAsmDecl::CreateDeserialized(ASTContext &C,
                                       SourceLocation());
 }
 
+void TopLevelStmtDecl::anchor() {}
+
+TopLevelStmtDecl *TopLevelStmtDecl::Create(ASTContext &C,
+                                           llvm::ArrayRef<Stmt *> Stmts) {
+  assert(!Stmts.empty());
+  assert(C.getLangOpts().IncrementalExtensions &&
+         "Must be used only in incremental mode");
+
+  SourceLocation BeginLoc = Stmts[0]->getBeginLoc();
+  DeclContext *DC = C.getTranslationUnitDecl();
+
+  auto *TLSD = new (C, DC) TopLevelStmtDecl(DC, BeginLoc);
+  TLSD->setStmts(C, Stmts);
+  return TLSD;
+}
+
+TopLevelStmtDecl *TopLevelStmtDecl::CreateDeserialized(ASTContext &C,
+                                                       unsigned ID) {
+  return new (C, ID) TopLevelStmtDecl(/*DC=*/nullptr, SourceLocation());
+}
+
+SourceRange TopLevelStmtDecl::getSourceRange() const {
+  return SourceRange(getLocation(), Stmts[NumStmts - 1]->getEndLoc());
+}
+
+FunctionDecl *TopLevelStmtDecl::getOrConvertToFunction() {
+  if (FD)
+    return FD;
+
+  ASTContext &C = getASTContext();
+  IdentifierInfo *Name =
+      &C.Idents.get("__stmts__" + llvm::utostr((uintptr_t)this));
+  SourceLocation NoLoc;
+  SourceLocation BeginLoc = getBeginLoc();
+  FunctionProtoType::ExtProtoInfo EPI;
+  QualType FunctionTy = C.getFunctionType(C.VoidTy, llvm::None, EPI);
+  TypeSourceInfo *TSI = C.getTrivialTypeSourceInfo(FunctionTy);
+  auto *TUDecl = cast<TranslationUnitDecl>(getDeclContext());
+  FD = FunctionDecl::Create(C, TUDecl, BeginLoc, NoLoc, Name, FunctionTy, TSI,
+                            SC_None);
+
+  auto StmtArrayRef = llvm::makeArrayRef(Stmts, NumStmts);
+  auto *Body = CompoundStmt::Create(C, StmtArrayRef, FPOptionsOverride(),
+                                    BeginLoc, getEndLoc());
+  FD->setBody(Body);
+  return FD;
+}
+
 void EmptyDecl::anchor() {}
 
 EmptyDecl *EmptyDecl::Create(ASTContext &C, DeclContext *DC, SourceLocation L) {

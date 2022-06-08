@@ -6354,6 +6354,14 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
     getModule().appendModuleInlineAsm(AD->getAsmString()->getString());
     break;
   }
+  case Decl::TopLevelStmt: {
+    FunctionDecl *FD = cast<TopLevelStmtDecl>(D)->getOrConvertToFunction();
+    EmitTopLevelDecl(FD);
+    GlobalDecl GD(FD);
+    auto *Fn = cast<llvm::Function>(GetGlobalValue(getMangledName(GD)));
+    CXXGlobalInits.push_back(Fn);
+    break;
+  }
 
   case Decl::Import: {
     auto *Import = cast<ImportDecl>(D);

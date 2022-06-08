@@ -46,7 +46,44 @@ using namespace clang;
 ///           'using' 'namespace' '::'[opt] nested-name-specifier[opt]
 ///                 namespace-name ';'
 ///
-bool Parser::isCXXDeclarationStatement() {
+bool Parser::isCXXDeclarationStatement(
+    bool DisambiguatingWithExpression /*=false*/) {
+  assert(getLangOpts().CPlusPlus && "Must be called for C++ only.");
+  if (DisambiguatingWithExpression) {
+    if (Tok.is(tok::identifier)) {
+      RevertingTentativeParsingAction TPA(*this);
+      // Parse the C++ scope specifier.
+      CXXScopeSpec SS;
+      ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
+                                     /*ObjectHasErrors=*/false,
+                                     /*EnteringContext=*/true);
+
+      switch (Tok.getKind()) {
+      case tok::identifier: {
+        IdentifierInfo *II = Tok.getIdentifierInfo();
+        bool isDeductionGuide =
+            Actions.isDeductionGuideName(getCurScope(), *II, Tok.getLocation());
+        if (Actions.isCurrentClassName(*II, getCurScope(), &SS) ||
+            isDeductionGuide) {
+          if (isConstructorDeclarator(/*Unqualified=*/SS.isEmpty(),
+                                      isDeductionGuide,
+                                      DeclSpec::FriendSpecified::No))
+            return true;
+        }
+        break;
+      }
+      case tok::kw_operator:
+        return true;
+      case tok::annot_cxxscope: // Check if this is a dtor.
+        if (NextToken().is(tok::tilde))
+          return true;
+        break;
+      default:
+        break;
+      }
+    }
+  }
+
   switch (Tok.getKind()) {
     // asm-definition
   case tok::kw_asm:

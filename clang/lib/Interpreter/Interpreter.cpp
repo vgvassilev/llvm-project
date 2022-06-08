@@ -139,6 +139,8 @@ IncrementalCompilerBuilder::create(std::vector<const char *> &ClangArgv) {
   // action and use other actions in incremental mode.
   // FIXME: Print proper driver diagnostics if the driver flags are wrong.
   ClangArgv.insert(ClangArgv.begin() + 1, "-c");
+  ClangArgv.insert(ClangArgv.begin() + 2, "-Xclang");
+  ClangArgv.insert(ClangArgv.begin() + 3, "-fincremental-extensions");
 
   if (!llvm::is_contained(ClangArgv, " -x")) {
     // We do C++ by default; append right after argv[0] if no "-x" given
