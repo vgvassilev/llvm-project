@@ -320,6 +320,7 @@ bool Parser::SkipUntil(ArrayRef<tok::TokenKind> Toks, SkipUntilFlags Flags) {
     case tok::annot_module_begin:
     case tok::annot_module_end:
     case tok::annot_module_include:
+    case tok::annot_input_end:
       // Stop before we change submodules. They generally indicate a "good"
       // place to pick up parsing again (except in the special case where
       // we're trying to skip to EOF).
@@ -616,8 +617,8 @@ bool Parser::ParseTopLevelDecl(DeclGroupPtrTy &Result,
 
   // Skip over the EOF token, flagging end of previous input for incremental
   // processing
-  if (PP.isIncrementalProcessingEnabled() && Tok.is(tok::eof))
-    ConsumeToken();
+  if (PP.isIncrementalProcessingEnabled() && Tok.is(tok::annot_input_end))
+    ConsumeAnyToken();
 
   Result = nullptr;
   switch (Tok.getKind()) {
@@ -697,6 +698,7 @@ bool Parser::ParseTopLevelDecl(DeclGroupPtrTy &Result,
     return false;
 
   case tok::eof:
+  case tok::annot_input_end:
     // Check whether -fmax-tokens= was reached.
     if (PP.getMaxTokens() != 0 && PP.getTokenCount() > PP.getMaxTokens()) {
       PP.Diag(Tok.getLocation(), diag::warn_max_tokens_total)

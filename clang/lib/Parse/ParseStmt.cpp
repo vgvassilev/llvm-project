@@ -543,8 +543,16 @@ StmtResult Parser::ParseExprStatement(ParsedStmtContext StmtCtx) {
     return ParseCaseStatement(StmtCtx, /*MissingCase=*/true, Expr);
   }
 
-  // Otherwise, eat the semicolon.
-  ExpectAndConsumeSemi(diag::err_expected_semi_after_expr);
+  if (PP.isIncrementalProcessingEnabled() && Tok.is(tok::annot_input_end)) {
+    // If we're parsing an ExprStmt and the last semicolon is missing and the
+    // incremental externsion is enabled and we're reaching the end, consider we
+    // want to do value printing. Note we shouldn't eat the token since the
+    // callback need it.
+    Tok.setFlag(Token::IsEditorPlaceholder);
+  } else {
+    // Otherwise, eat the semicolon.
+    ExpectAndConsumeSemi(diag::err_expected_semi_after_expr);
+  }
   return handleExprStmt(Expr, StmtCtx);
 }
 

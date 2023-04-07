@@ -47,6 +47,7 @@ public:
                       const clang::TargetInfo &TI);
   ~IncrementalExecutor();
 
+  llvm::Error addModule(std::unique_ptr<llvm::Module> &M);
   llvm::Error addModule(PartialTranslationUnit &PTU);
   llvm::Error removeModule(PartialTranslationUnit &PTU);
   llvm::Error runCtors() const;

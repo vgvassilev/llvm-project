@@ -11,7 +11,10 @@ set(LLVM_LINK_COMPONENTS
 add_clang_library(clangInterpreter
   IncrementalExecutor.cpp
   IncrementalParser.cpp
+  IncrementalASTConsumer.cpp
   Interpreter.cpp
+  Value.cpp
+  InterpreterUtils.cpp
 
   DEPENDS
   intrinsics_gen

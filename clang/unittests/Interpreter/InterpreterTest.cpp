@@ -17,6 +17,7 @@
 #include "clang/AST/Mangle.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/TextDiagnosticPrinter.h"
+#include "clang/Interpreter/Value.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Sema.h"
 
@@ -32,6 +33,10 @@ using namespace clang;
 #if defined(_AIX)
 #define CLANG_INTERPRETER_NO_SUPPORT_EXEC
 #endif
+
+int Global = 42;
+int getGlobal() { return Global; }
+void setGlobal(int val) { Global = val; }
 
 namespace {
 using Args = std::vector<const char *>;
@@ -276,8 +281,7 @@ TEST(IncrementalProcessing, InstantiateTemplate) {
   std::vector<const char *> Args = {"-fno-delayed-template-parsing"};
   std::unique_ptr<Interpreter> Interp = createInterpreter(Args);
 
-  llvm::cantFail(Interp->Parse("void* operator new(__SIZE_TYPE__, void* __p);"
-                               "extern \"C\" int printf(const char*,...);"
+  llvm::cantFail(Interp->Parse("extern \"C\" int printf(const char*,...);"
                                "class A {};"
                                "struct B {"
                                "  template<typename T>"
@@ -314,4 +318,38 @@ TEST(IncrementalProcessing, InstantiateTemplate) {
   free(NewA);
 }
 
+TEST(InterpreterTest, Value) {
+  std::unique_ptr<Interpreter> Interp = createInterpreter();
+
+  Value V1;
+  llvm::cantFail(Interp->ParseAndExecute("int x = 42;"));
+  llvm::cantFail(Interp->ParseAndExecute("x", &V1));
+  EXPECT_EQ(V1.getInt(), 42);
+  EXPECT_TRUE(V1.getType()->isIntegerType());
+
+  Value V2;
+  llvm::cantFail(Interp->ParseAndExecute("double y = 3.14;"));
+  llvm::cantFail(Interp->ParseAndExecute("y", &V2));
+  EXPECT_EQ(V2.getAs<double>(), 3.14);
+  EXPECT_TRUE(V2.getType()->isFloatingType());
+  EXPECT_EQ(V2.castAs<int>(), 3);
+
+  llvm::cantFail(Interp->ParseAndExecute("int getGlobal();"));
+  llvm::cantFail(Interp->ParseAndExecute("void setGlobal(int);"));
+  Value V3;
+  llvm::cantFail(Interp->ParseAndExecute("getGlobal()", &V3));
+  EXPECT_EQ(V3.getInt(), 42);
+  EXPECT_TRUE(V3.getType()->isIntegerType());
+
+  // Change the global from the compiled code.
+  setGlobal(43);
+  Value V4;
+  llvm::cantFail(Interp->ParseAndExecute("getGlobal()", &V4));
+  EXPECT_EQ(V4.getInt(), 43);
+  EXPECT_TRUE(V4.getType()->isIntegerType());
+
+  // Change the global from the interpreted code.
+  llvm::cantFail(Interp->ParseAndExecute("setGlobal(44);"));
+  EXPECT_EQ(getGlobal(), 44);
+}
 } // end anonymous namespace

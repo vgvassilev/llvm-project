@@ -12,6 +12,7 @@
 
 #include "IncrementalParser.h"
 
+#include "IncrementalASTConsumer.h"
 #include "clang/AST/DeclContextInternals.h"
 #include "clang/CodeGen/BackendUtil.h"
 #include "clang/CodeGen/CodeGenAction.h"
@@ -21,7 +22,6 @@
 #include "clang/FrontendTool/Utils.h"
 #include "clang/Parse/Parser.h"
 #include "clang/Sema/Sema.h"
-
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/CrashRecoveryContext.h"
 #include "llvm/Support/Error.h"
@@ -122,7 +122,8 @@ public:
   }
 };
 
-IncrementalParser::IncrementalParser(std::unique_ptr<CompilerInstance> Instance,
+IncrementalParser::IncrementalParser(Interpreter &Interp,
+                                     std::unique_ptr<CompilerInstance> Instance,
                                      llvm::LLVMContext &LLVMCtx,
                                      llvm::Error &Err)
     : CI(std::move(Instance)) {
@@ -131,6 +132,9 @@ IncrementalParser::IncrementalParser(std::unique_ptr<CompilerInstance> Instance,
   if (Err)
     return;
   CI->ExecuteAction(*Act);
+  std::unique_ptr<ASTConsumer> IncrConsumer =
+      std::make_unique<IncrementalASTConsumer>(Interp, CI->takeASTConsumer());
+  CI->setASTConsumer(std::move(IncrConsumer));
   Consumer = &CI->getASTConsumer();
   P.reset(
       new Parser(CI->getPreprocessor(), CI->getSema(), /*SkipBodies=*/false));
@@ -158,8 +162,8 @@ IncrementalParser::ParseOrWrapTopLevelDecl() {
   LastPTU.TUPart = C.getTranslationUnitDecl();
 
   // Skip previous eof due to last incremental input.
-  if (P->getCurToken().is(tok::eof)) {
-    P->ConsumeToken();
+  if (P->getCurToken().is(tok::annot_input_end)) {
+    P->ConsumeAnyToken();
     // FIXME: Clang does not call ExitScope on finalizing the regular TU, we
     // might want to do that around HandleEndOfTranslationUnit.
     P->ExitScope();
@@ -203,14 +207,6 @@ IncrementalParser::ParseOrWrapTopLevelDecl() {
   Consumer->HandleTranslationUnit(C);
 
   return LastPTU;
-}
-
-static CodeGenerator *getCodeGen(FrontendAction *Act) {
-  IncrementalAction *IncrAct = static_cast<IncrementalAction *>(Act);
-  FrontendAction *WrappedAct = IncrAct->getWrapped();
-  if (!WrappedAct->hasIRSupport())
-    return nullptr;
-  return static_cast<CodeGenAction *>(WrappedAct)->getCodeGenerator();
 }
 
 llvm::Expected<PartialTranslationUnit &>
@@ -259,23 +255,36 @@ IncrementalParser::Parse(llvm::StringRef input) {
     Token Tok;
     do {
       PP.Lex(Tok);
-    } while (Tok.isNot(tok::eof));
+    } while (Tok.isNot(tok::annot_input_end));
   }
 
   Token AssertTok;
   PP.Lex(AssertTok);
-  assert(AssertTok.is(tok::eof) &&
+  assert(AssertTok.is(tok::annot_input_end) &&
          "Lexer must be EOF when starting incremental parse!");
 
-  if (CodeGenerator *CG = getCodeGen(Act.get())) {
-    std::unique_ptr<llvm::Module> M(CG->ReleaseModule());
-    CG->StartModule("incr_module_" + std::to_string(PTUs.size()),
-                    M->getContext());
-
+  if (std::unique_ptr<llvm::Module> M = GenModule())
     PTU->TheModule = std::move(M);
-  }
 
   return PTU;
+}
+
+CodeGenerator *IncrementalParser::GetCodeGen() const {
+  IncrementalAction *IncrAct = static_cast<IncrementalAction *>(Act.get());
+  FrontendAction *WrappedAct = IncrAct->getWrapped();
+  if (!WrappedAct->hasIRSupport())
+    return nullptr;
+  return static_cast<CodeGenAction *>(WrappedAct)->getCodeGenerator();
+}
+
+std::unique_ptr<llvm::Module> IncrementalParser::GenModule() {
+  static unsigned ID = 0;
+  if (CodeGenerator *CG = GetCodeGen()) {
+    std::unique_ptr<llvm::Module> M(CG->ReleaseModule());
+    CG->StartModule("incr_module_" + std::to_string(ID++), M->getContext());
+    return M;
+  }
+  return nullptr;
 }
 
 void IncrementalParser::CleanUpPTU(PartialTranslationUnit &PTU) {
@@ -297,7 +306,7 @@ void IncrementalParser::CleanUpPTU(PartialTranslationUnit &PTU) {
 }
 
 llvm::StringRef IncrementalParser::GetMangledName(GlobalDecl GD) const {
-  CodeGenerator *CG = getCodeGen(Act.get());
+  CodeGenerator *CG = GetCodeGen();
   assert(CG);
   return CG->GetMangledName(GD);
 }

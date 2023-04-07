@@ -7216,8 +7216,14 @@ void CodeGenModule::printPostfixForExternalizedDecl(llvm::raw_ostream &OS,
 }
 
 void CodeGenModule::moveLazyEmissionStates(CodeGenModule *NewBuilder) {
-  assert(DeferredDeclsToEmit.empty() &&
-         "Should have emitted all decls deferred to emit.");
+  // FIXME: Re-enable the assertions once we fix regular codegen to not leave
+  // weak references behind.
+  // The code example also leaves entries in WeakRefReferences in regular clang.
+  // #include <memory>
+  // auto p = std::make_shared<int>(42);
+  //
+  // assert(DeferredDeclsToEmit.empty() &&
+  //        "Should have emitted all decls deferred to emit.");
   assert(NewBuilder->DeferredDecls.empty() &&
          "Newly created module should not have deferred decls");
   NewBuilder->DeferredDecls = std::move(DeferredDecls);

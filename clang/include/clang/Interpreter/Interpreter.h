@@ -14,10 +14,12 @@
 #ifndef LLVM_CLANG_INTERPRETER_INTERPRETER_H
 #define LLVM_CLANG_INTERPRETER_INTERPRETER_H
 
-#include "clang/Interpreter/PartialTranslationUnit.h"
-
+#include "clang/AST/Decl.h"
 #include "clang/AST/GlobalDecl.h"
+#include "clang/Interpreter/PartialTranslationUnit.h"
+#include "clang/Interpreter/Value.h"
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
 #include "llvm/Support/Error.h"
 
@@ -33,6 +35,7 @@ class ThreadSafeContext;
 
 namespace clang {
 
+class Value;
 class CompilerInstance;
 class IncrementalExecutor;
 class IncrementalParser;
@@ -53,24 +56,22 @@ class Interpreter {
   Interpreter(std::unique_ptr<CompilerInstance> CI, llvm::Error &Err);
 
   llvm::Error CreateExecutor();
+  unsigned InitPTUSize = 0;
+  Value LastValue;
 
 public:
   ~Interpreter();
   static llvm::Expected<std::unique_ptr<Interpreter>>
   create(std::unique_ptr<CompilerInstance> CI);
+  ASTContext &getASTContext() const;
   const CompilerInstance *getCompilerInstance() const;
   llvm::Expected<llvm::orc::LLJIT &> getExecutionEngine();
 
   llvm::Expected<PartialTranslationUnit &> Parse(llvm::StringRef Code);
+  llvm::Error ExecuteModule(std::unique_ptr<llvm::Module> &M);
   llvm::Error Execute(PartialTranslationUnit &T);
-  llvm::Error ParseAndExecute(llvm::StringRef Code) {
-    auto PTU = Parse(Code);
-    if (!PTU)
-      return PTU.takeError();
-    if (PTU->TheModule)
-      return Execute(*PTU);
-    return llvm::Error::success();
-  }
+  llvm::Error ParseAndExecute(llvm::StringRef Code, Value *V = nullptr);
+  llvm::Expected<void *> CompileDtorCall(const RecordDecl *RD);
 
   /// Undo N previous incremental inputs.
   llvm::Error Undo(unsigned N = 1);
@@ -91,6 +92,30 @@ public:
   /// file.
   llvm::Expected<llvm::JITTargetAddress>
   getSymbolAddressFromLinkerName(llvm::StringRef LinkerName) const;
+
+  /// Compiles the synthesized Decl and returns the JITTargetAddress.
+  llvm::Expected<llvm::JITTargetAddress> CompileDecl(Decl *D);
+
+  std::string CreateUniqName(std::string Base);
+
+  std::list<PartialTranslationUnit> &getPTUs();
+
+  enum InterfaceKind { NoAlloc, WithAlloc, CopyArray };
+
+  llvm::SmallVectorImpl<Expr *> &getValuePrintingInfo() {
+    return ValuePrintingInfo;
+  }
+
+  Expr *SynthesizeValueGetter(clang::Expr *E);
+
+private:
+  bool FindRuntimeInterface();
+
+  std::unique_ptr<llvm::Module> GenModule();
+
+  llvm::DenseMap<const RecordDecl *, void *> Dtors;
+
+  llvm::SmallVector<Expr *, 3> ValuePrintingInfo;
 };
 } // namespace clang
 
