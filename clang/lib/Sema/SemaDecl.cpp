@@ -19949,10 +19949,19 @@ Decl *Sema::ActOnFileScopeAsmDecl(Expr *expr,
   return New;
 }
 
-Decl *Sema::ActOnTopLevelStmtDecl(Stmt *Statement) {
-  auto *New = TopLevelStmtDecl::Create(Context, Statement);
-  Context.getTranslationUnitDecl()->addDecl(New);
+TopLevelStmtDecl *Sema::ActOnStartTopLevelStmtDecl(Scope *S) {
+  auto *New = TopLevelStmtDecl::Create(Context, /*Statement=*/nullptr);
+  PushFunctionScope();
+  ActOnStartOfCompoundStmt(/*IsStmtExpr=*/false);
+  PushDeclContext(S, New);
   return New;
+}
+
+void Sema::ActOnFinishTopLevelStmtDecl(TopLevelStmtDecl* D, Stmt *Statement) {
+  D->setStmt(Statement);
+  PopDeclContext();
+  ActOnFinishOfCompoundStmt();
+  PopFunctionScopeInfo();
 }
 
 void Sema::ActOnPragmaRedefineExtname(IdentifierInfo* Name,

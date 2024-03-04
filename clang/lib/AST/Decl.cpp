@@ -5404,14 +5404,13 @@ FileScopeAsmDecl *FileScopeAsmDecl::CreateDeserialized(ASTContext &C,
 void TopLevelStmtDecl::anchor() {}
 
 TopLevelStmtDecl *TopLevelStmtDecl::Create(ASTContext &C, Stmt *Statement) {
-  assert(Statement);
   assert(C.getLangOpts().IncrementalExtensions &&
          "Must be used only in incremental mode");
 
-  SourceLocation BeginLoc = Statement->getBeginLoc();
+  SourceLocation Loc = Statement ? Statement->getBeginLoc() : SourceLocation();
   DeclContext *DC = C.getTranslationUnitDecl();
 
-  return new (C, DC) TopLevelStmtDecl(DC, BeginLoc, Statement);
+  return new (C, DC) TopLevelStmtDecl(DC, Loc, Statement);
 }
 
 TopLevelStmtDecl *TopLevelStmtDecl::CreateDeserialized(ASTContext &C,
@@ -5422,6 +5421,12 @@ TopLevelStmtDecl *TopLevelStmtDecl::CreateDeserialized(ASTContext &C,
 
 SourceRange TopLevelStmtDecl::getSourceRange() const {
   return SourceRange(getLocation(), Statement->getEndLoc());
+}
+
+void TopLevelStmtDecl::setStmt(Stmt *S) {
+  assert(S);
+  Statement = S;
+  setLocation(Statement->getBeginLoc());
 }
 
 void EmptyDecl::anchor() {}

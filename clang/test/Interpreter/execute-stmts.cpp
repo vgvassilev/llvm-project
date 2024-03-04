@@ -41,3 +41,13 @@ for (; i > 4; --i) { printf("i = %d\n", i); };
 
 int j = i; printf("j = %d\n", j);
 // CHECK-NEXT: j = 4
+
+for(int i=0; i<2; i+=1) {};
+
+for(int i=0; i<2; i+=1) ;
+
+int a = 2;
+for(int i=0; i<2; i+=1) a-=1;
+
+int *aa=nullptr;
+if (auto *b=aa) *b += 1;

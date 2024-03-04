@@ -2005,6 +2005,7 @@ public:
     case Decl::Block:
     case Decl::Captured:
     case Decl::ObjCMethod:
+    case Decl::TopLevelStmt:
       return true;
     default:
       return getDeclKind() >= Decl::firstFunction &&
